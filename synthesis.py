@@ -7,8 +7,8 @@ usage: synthesis.py [options] <checkpoint> <text_list_file> <dst_dir>
 options:
     --hparams=<parmas>                Hyper parameters [default: ].
     --preset=<json>                   Path of preset parameters (json).
-    --checkpoint-seq2seq=<path>       Load seq2seq model from checkpoint path.
-    --checkpoint-postnet=<path>       Load postnet model from checkpoint path.
+    --waveglow_path=<path>            Load waveglow model from checkpoint path.
+    --denoiser_strength=<N>               waveglow denoiser_strength [default: 0.1]
     --file-name-suffix=<s>            File name suffix [default: ].
     --max-decoder-steps=<N>           Max decoder steps [default: 500].
     --replace_pronunciation_prob=<N>  Prob [default: 0.5].
@@ -20,6 +20,7 @@ options:
 from docopt import docopt
 
 import sys
+sys.path.insert(0, 'waveglow')
 import os
 from os.path import dirname, join, basename, splitext
 
@@ -34,13 +35,13 @@ import time
 # The deepvoice3 model
 from deepvoice3_pytorch import frontend
 from hparams import hparams, hparams_debug_string
+from denoiser import Denoiser
 
 from tqdm import tqdm
 
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
 _frontend = None  # to be set later
-
 
 def tts(model, text, p=0, speaker_id=None, fast=False):
     """Convert text to speech waveform given a deepvoice3 model.
@@ -83,6 +84,37 @@ def tts(model, text, p=0, speaker_id=None, fast=False):
 
     return waveform, alignment, spectrogram, mel
 
+def tts_use_waveglow(model, text, waveglow, p=0, speaker_id=None, fast=True, denoiser_strength=0.1):
+    model = model.to(device)
+    model.eval()
+    if fast:
+        model.make_generation_fast_()
+
+    if denoiser_strength > 0:
+        denoiser = Denoiser(waveglow).to(device)
+    for k in waveglow.convinv:
+        k.float()
+    waveglow = waveglow.to(device)
+    waveglow.eval()
+
+    sequence = np.array(_frontend.text_to_sequence(text, p=p))
+    sequence = torch.from_numpy(sequence).unsqueeze(0).long().to(device)
+    text_positions = torch.arange(1, sequence.size(-1) + 1).unsqueeze(0).long().to(device)
+    speaker_ids = None if speaker_id is None else torch.LongTensor([speaker_id]).to(device)
+
+    # Greedy decoding
+    with torch.no_grad():
+        mel, alignments, done = model(
+            sequence, text_positions=text_positions, speaker_ids=speaker_ids)
+        waveform = waveglow.infer(mel.transpose(1,2), sigma=0.6)
+    alignments = alignments[0].cpu().data.numpy()
+    mel = mel[0].cpu().data.numpy()
+    if denoiser_strength > 0:
+        waveform = denoiser(waveform, denoiser_strength).squeeze(0)
+    waveform = waveform[0].cpu().data.numpy()
+
+    return waveform, alignments, mel
+
 
 def _load(checkpoint_path):
     if use_cuda:
@@ -99,8 +131,8 @@ if __name__ == "__main__":
     checkpoint_path = args["<checkpoint>"]
     text_list_file_path = args["<text_list_file>"]
     dst_dir = args["<dst_dir>"]
-    checkpoint_seq2seq_path = args["--checkpoint-seq2seq"]
-    checkpoint_postnet_path = args["--checkpoint-postnet"]
+    waveglow_path = args["--waveglow_path"]
+    denoiser_strength = float(args["--denoiser_strength"])
     max_decoder_steps = int(args["--max-decoder-steps"])
     file_name_suffix = args["--file-name-suffix"]
     replace_pronunciation_prob = float(args["--replace_pronunciation_prob"])
@@ -127,17 +159,13 @@ if __name__ == "__main__":
     # Model
     model = build_model(training_type=training_type)
 
-    # Load checkpoints separately
-    if checkpoint_postnet_path is not None and checkpoint_seq2seq_path is not None:
-        checkpoint = _load(checkpoint_seq2seq_path)
-        model.seq2seq.load_state_dict(checkpoint["state_dict"])
-        checkpoint = _load(checkpoint_postnet_path)
-        model.postnet.load_state_dict(checkpoint["state_dict"])
-        checkpoint_name = splitext(basename(checkpoint_seq2seq_path))[0]
-    else:
-        checkpoint = _load(checkpoint_path)
-        model.load_state_dict(checkpoint["state_dict"])
-        checkpoint_name = splitext(basename(checkpoint_path))[0]
+    checkpoint = _load(checkpoint_path)
+    model.load_state_dict(checkpoint["state_dict"])
+    checkpoint_name = splitext(basename(checkpoint_path))[0]
+
+    # load waveglow
+    waveglow = torch.load(waveglow_path, map_location=device)['model']
+    waveglow = waveglow.remove_weightnorm(waveglow)
 
     model.seq2seq.decoder.max_decoder_steps = max_decoder_steps
 
@@ -148,8 +176,12 @@ if __name__ == "__main__":
             text = line.decode("utf-8")[:-1]
             words = nltk.word_tokenize(text)
             start = time.time()
-            waveform, alignments, _, mel = tts(
-                model, text, p=replace_pronunciation_prob, speaker_id=speaker_id, fast=True)
+            if waveglow_path is not None:
+                waveform, alignments, mel = tts_use_waveglow(
+                    model, text, waveglow, p=replace_pronunciation_prob, speaker_id=speaker_id, fast=True, denoiser_strength=denoiser_strength)
+            else:
+                waveform, alignments, _, mel = tts(
+                    model, text, p=replace_pronunciation_prob, speaker_id=speaker_id, fast=True)
             end = time.time() - start
             dst_wav_path = join(dst_dir, "{}_{}{}.wav".format(
                 idx, checkpoint_name, file_name_suffix))
