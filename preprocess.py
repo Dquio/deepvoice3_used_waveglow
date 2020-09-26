@@ -19,19 +19,21 @@ from hparams import hparams, hparams_debug_string
 
 
 def preprocess(mod, in_dir, out_dir, num_workers):
-    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True) # 前処理したデータを置いておくディレクトリを作成
     metadata = mod.build_from_path(in_dir, out_dir, num_workers, tqdm=tqdm)
     write_metadata(metadata, out_dir)
 
 
 def write_metadata(metadata, out_dir):
+    # テキストファイルを作成
     with open(os.path.join(out_dir, 'train.txt'), 'w', encoding='utf-8') as f:
         for m in metadata:
             f.write('|'.join([str(x) for x in m]) + '\n')
 
-    frames = sum([m[2] for m in metadata])
-    frame_shift_ms = hparams.hop_size / hparams.sample_rate * 1000
+    frames = sum([m[2] for m in metadata]) # 合計のフレーム数
+    frame_shift_ms = hparams.hop_size / hparams.sample_rate * 1000 # 1回分シフトする秒数(ms)を計算
     hours = frames * frame_shift_ms / (3600 * 1000)
+
     print('Wrote %d utterances, %d frames (%.2f hours)' % (len(metadata), frames, hours))
     print('Max input length:  %d' % max(len(m[7]) for m in metadata))
     print('Max output length: %d' % max(m[2] for m in metadata))
@@ -44,9 +46,10 @@ def write_metadata(metadata, out_dir):
 
 if __name__ == "__main__":
     args = docopt(__doc__)
-    name = args["<name>"]
-    in_dir = args["<in_dir>"]
-    out_dir = args["<out_dir>"]
+    name = args["<name>"] # 使用するデータセットの名前
+    in_dir = args["<in_dir>"] # 前処理前のデータのパス
+    out_dir = args["<out_dir>"] # 前処理後のデータを置いておくディレクトリ
+
     num_workers = args["--num_workers"]
     num_workers = cpu_count() if num_workers is None else int(num_workers)
     preset = args["--preset"]
@@ -55,6 +58,7 @@ if __name__ == "__main__":
     if preset is not None:
         with open(preset) as f:
             hparams.parse_json(f.read())
+
     # Override hyper parameters
     hparams.parse(args["--hparams"])
     assert hparams.name == "deepvoice3"

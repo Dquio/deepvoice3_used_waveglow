@@ -149,6 +149,7 @@ class Conv1dGLU(nn.Module):
         else:
             splitdim = 1
             x = self.conv(x)
+            # Todo: 未来のステップが除去された後の状態を確認
             # remove future time steps
             x = x[:, :, :residual.size(-1)] if self.causal else x
 

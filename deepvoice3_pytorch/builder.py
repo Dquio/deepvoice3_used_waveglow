@@ -37,7 +37,7 @@ def deepvoice3(n_vocab, embed_dim=256, mel_dim=80, linear_dim=513, r=4,
 
     # Seq2seq
     h = encoder_channels  # hidden dim (channels)
-    k = kernel_size   # kernel size
+    k = 7   # kernel size
     encoder = Encoder(
         n_vocab, embed_dim, padding_idx=padding_idx,
         n_speakers=n_speakers, speaker_embed_dim=speaker_embed_dim,
@@ -45,6 +45,7 @@ def deepvoice3(n_vocab, embed_dim=256, mel_dim=80, linear_dim=513, r=4,
         embedding_weight_std=embedding_weight_std,
         # (channels, kernel_size, dilation)
         convolutions=[(h, k, 1),]*num_encoder_layer,
+        num_attention_layers=num_decoder_layer, # 追加
     )
 
     h = decoder_channels
@@ -54,7 +55,9 @@ def deepvoice3(n_vocab, embed_dim=256, mel_dim=80, linear_dim=513, r=4,
         embed_dim, attention_hidden=att_hid, in_dim=mel_dim, r=r, padding_idx=padding_idx,
         n_speakers=n_speakers, speaker_embed_dim=speaker_embed_dim,
         dropout=dropout, max_positions=max_positions,
-        preattention=[(mel_dim*r,h//2),(h//2,h)],
+        # preattention=[(mel_dim*r,h//2),(h//2,h)],
+        # preattention=[(mel_dim*r,h),(h,h)],
+        preattention=[(mel_dim*r,h//4),(h//4,h//2),(h//2,h)],
         convolutions=[(h, k, 1),]*num_decoder_layer,
         force_monotonic_attention=force_monotonic_attention,
         query_position_rate=query_position_rate,

@@ -60,7 +60,7 @@ hparams = hparam_tf.hparam.HParams(
     allow_clipping_in_normalization=True,
 
     # Model:
-    outputs_per_step=4,  # must be 1 when builder="nyanko"
+    outputs_per_step=4,  # must be 1 when builder="nyanko" # default: 4
     embedding_weight_std=1,
     speaker_embedding_weight_std=0.1,
     padding_idx=0,
@@ -68,13 +68,13 @@ hparams = hparam_tf.hparam.HParams(
     # try setting larger value if you want to give very long text input
     max_positions=2048,
     dropout=1-0.95,
-    kernel_size=5,
-    text_embed_dim=256,
-    encoder_channels=64,
-    num_encoder_layer=7,
-    decoder_channels=256,
-    num_decoder_layer=4,
-    attention_hidden=128,
+    kernel_size=7, # default: 5
+    text_embed_dim=512, # default: 256
+    encoder_channels=128, # default: 64
+    num_encoder_layer=9, # default: 7
+    decoder_channels=512, # default: 256
+    num_decoder_layer=4, # default: 4
+    attention_hidden=256, # default: 128
     converter_channels=256,
     num_converter_layer=5,
     query_position_rate=1.0,
@@ -101,7 +101,7 @@ hparams = hparam_tf.hparam.HParams(
     initial_learning_rate=1e-3,
     lr_schedule=None,
     lr_schedule_kwargs={},
-    nepochs=1000,
+    nepochs=1401,
     weight_decay=0.0,
     max_clip=100.0,
     clip_thresh=5.0,

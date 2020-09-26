@@ -272,8 +272,12 @@ class Decoder(nn.Module):
             outputs = self.incremental_forward(encoder_out, text_positions, speaker_embed)
             return outputs
 
+        # Todo: inputsの中身を確認
         # Grouping multiple frames if necessary
         if inputs.size(-1) == self.in_dim:
+            # inputs.size(0) :
+            # inputs.size(1) : 時間次元
+            # inputs.size(2) : メル次元
             inputs = inputs.view(inputs.size(0), inputs.size(1) // self.r, -1)
         assert inputs.size(-1) == self.in_dim * self.r
 

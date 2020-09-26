@@ -29,8 +29,8 @@ def build_from_path(in_dir, out_dir, num_workers=1, tqdm=lambda x: x):
     index = 1
     with open(os.path.join(in_dir, 'metadata.csv'), encoding='utf-8') as f:
         for line in f:
-            parts = line.strip().split('|')
-            wav_path = os.path.join(in_dir, 'wavs', '%s.wav' % parts[0])
+            parts = line.strip().split('|') # 音声ファイルの名前と英文を分割
+            wav_path = os.path.join(in_dir, 'wavs', '%s.wav' % parts[0]) # 音声ファイルのパスを取得
             text = parts[2]
             if len(text) < hparams.min_text:
                 continue
@@ -58,16 +58,18 @@ def _process_utterance(out_dir, index, wav_path, text):
 
     # Load the audio to a numpy array:
 
-    wav = audio.load_wav(wav_path)
+    wav = audio.load_wav(wav_path) # 音声ファイルのダウンロード
 
     if hparams.rescaling:
         wav = wav / np.abs(wav).max() * hparams.rescaling_max
 
     #wav = audio.preemphasis(wav)
+    # melを生成
     #melはパワースペクトラムで計算しない(power=1.0がそれ)
     mel_spectrogram = librosa.feature.melspectrogram(wav, n_fft=1024,hop_length=256,n_mels=80,fmin=0.0,fmax=8000,power=1.0)
+    # 対数メルに変換
     mel_spectrogram = np.log(np.abs(mel_spectrogram).clip(1e-5,10)).astype(np.float32)
-    n_frames = mel_spectrogram.shape[1]
+    n_frames = mel_spectrogram.shape[1] # フレーム数(窓関数によって切り取った部分の数)を取得
     world_frames = 1
     '''
     # Compute the linear-scale spectrogram from the wav:

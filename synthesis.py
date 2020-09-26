@@ -90,6 +90,8 @@ def tts_use_waveglow(model, text, waveglow, p=0, speaker_id=None, fast=True, den
     if fast:
         model.make_generation_fast_()
 
+    # waveglow = waveglow.to(device) #  99->93行目に移動
+    # waveglow.eval() # 100->94行目に移動
     if denoiser_strength > 0:
         denoiser = Denoiser(waveglow).to(device)
     for k in waveglow.convinv:
@@ -212,6 +214,7 @@ Your browser does not support the audio element.
                              hparams.builder, name, basename(dst_alignment_path)))
             else:
                 print(idx, ": {}\n ({} chars, {} words) generate time:{}s".format(text, len(text), len(words), end))
+                print(" per chars:{}s\n per words:{}s".format(end/len(text), end/len(words)))
 
     print("Finished! Check out {} for generated audio samples.".format(dst_dir))
     sys.exit(0)

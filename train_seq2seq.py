@@ -226,6 +226,7 @@ def train(device, model, data_loader, optimizer, writer,
 
     global global_step, global_epoch
     while global_epoch < nepochs:
+        running_mel_l1_loss = 0.
         running_loss = 0.
         print("{}epoch:".format(global_epoch))
         for step, (x, input_lengths, mel, positions, done, target_lengths,
@@ -306,6 +307,7 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             writer.add_scalar("learning rate", current_lr, global_step)
 
             global_step += 1
+            running_mel_l1_loss += mel_loss.item()
             running_loss += loss.item()
 
             if global_step > 0 and global_step % checkpoint_interval == 0:
@@ -321,18 +323,24 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
                 else:
                     eval_model(global_step, writer, device, model, checkpoint_dir, ismultispeaker)
 
+        averaged_mel_l1_loss = running_mel_l1_loss / (len(data_loader))
         averaged_loss = running_loss / (len(data_loader))
+        writer.add_scalar("mel_l1_loss (per epoch)", averaged_mel_l1_loss, global_epoch)
         writer.add_scalar("loss (per epoch)", averaged_loss, global_epoch)
         print("Loss: {}".format(running_loss / (len(data_loader))))
 
         global_epoch += 1
 
 if __name__ == "__main__":
+
+    '''パラメータの取得'''
+
     args = docopt(__doc__)
     print("Command line args:\n", args)
     checkpoint_dir = args["--checkpoint-dir"]
     checkpoint_path = args["--checkpoint"]
     waveglow_path = args['--waveglow_path']
+
     load_embedding = args["--load-embedding"]
     checkpoint_restore_parts = args["--restore-parts"]
     speaker_id = args["--speaker-id"]
@@ -366,6 +374,8 @@ if __name__ == "__main__":
     _frontend = getattr(frontend, hparams.frontend)
 
     os.makedirs(checkpoint_dir, exist_ok=True)
+
+    '''データのセッティング'''
 
     # Input dataset definitions
     X = FileSourceDataset(TextDataSource(data_root, speaker_id))

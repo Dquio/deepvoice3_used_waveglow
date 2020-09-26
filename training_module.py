@@ -291,7 +291,7 @@ def eval_model(global_step, writer, device, model, checkpoint_dir, ismultispeake
     model_eval.load_state_dict(model.state_dict())
 
     # load waveglow
-    waveglow = torch.load(waveglow_path)['model']
+    waveglow = torch.load(waveglow_path, map_location=device)['model'].to(device)
     waveglow = waveglow.remove_weightnorm(waveglow)
 
     # hard coded
@@ -299,7 +299,7 @@ def eval_model(global_step, writer, device, model, checkpoint_dir, ismultispeake
     for speaker_id in speaker_ids:
         speaker_str = "multispeaker{}".format(speaker_id) if speaker_id is not None else "single"
 
-        for idx, text in enumerate(texts, 1):
+        for idx, text in tqdm(enumerate(texts, 1)):
             if waveglow_path is not None:
                 signal, alignments, mel = synthesis.tts_use_waveglow(
                     model_eval, text, waveglow, p=1, speaker_id=speaker_id, fast=True, denoiser_strength=denoiser_strength)
