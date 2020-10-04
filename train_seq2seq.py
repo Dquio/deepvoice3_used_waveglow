@@ -226,6 +226,8 @@ def train(device, model, data_loader, optimizer, writer,
 
     global global_step, global_epoch
     while global_epoch < nepochs:
+        running_pre_mel_loss = 0.
+        running_post_mel_loss = 0
         running_loss = 0.
         print("{}epoch:".format(global_epoch))
         for step, (x, input_lengths, mel, positions, done, target_lengths,
@@ -265,24 +267,26 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             target_lengths = target_lengths.to(device)
             speaker_ids = speaker_ids.to(device) if ismultispeaker else None
 
-            # model output
-            mel_outputs, attn, done_hat = model(
+            # model output (postnet version)
+            mel_outputs, mel_outputs_postnet, attn, done_hat = model(
                 x, mel, speaker_ids=speaker_ids,
                 text_positions=text_positions, frame_positions=frame_positions,
                 input_lengths=input_lengths)
             # reshape
             mel_outputs = mel_outputs.view(len(mel), -1, mel.size(-1))
+            mel_outputs_postnet = mel_outputs_postnet.view(len(mel), -1, mel.size(-1))
 
             # Losses
             mel_loss = l1(mel_outputs[:, :-r, :], mel[:, r:, :])
+            mel_postnet_loss = l1(mel_outputs_postnet[:, :-r, :], mel[:, r:, :])
             # done:
             done_loss = binary_criterion(done_hat, done)
             #combine Losses
-            loss = mel_loss + done_loss
+            loss = mel_loss + mel_postnet_loss + done_loss
 
             if global_epoch == 0 and global_step == 0:
                 tm.save_states(
-                    global_step, writer, mel_outputs, converter_outputs, attn,
+                    global_step, writer, mel_outputs, mel_outputs_postnet, converter_outputs, attn,
                     mel, y, input_lengths, checkpoint_dir)
                 tm.save_checkpoint(
                     model, optimizer, global_step, checkpoint_dir, global_epoch)
@@ -300,17 +304,20 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             # Logs
             writer.add_scalar("loss", float(loss.item()), global_step)
             writer.add_scalar("done_loss", float(done_loss.item()), global_step)
-            writer.add_scalar("mel_l1_loss", float(mel_loss.item()), global_step)
+            writer.add_scalar("mel_l1_loss (pre)", float(mel_loss.item()), global_step)
+            writer.add_scalar("mel_l1_loss (post)", float(mel_postnet_loss.item()), global_step)
             if clip_thresh > 0:
                 writer.add_scalar("gradient norm", grad_norm, global_step)
             writer.add_scalar("learning rate", current_lr, global_step)
 
             global_step += 1
+            running_pre_mel_loss += mel_loss.item()
+            running_post_mel_loss += mel_postnet_loss.item()
             running_loss += loss.item()
 
             if global_step > 0 and global_step % checkpoint_interval == 0:
                 tm.save_states(
-                    global_step, writer, mel_outputs, converter_outputs, attn,
+                    global_step, writer, mel_outputs, mel_outputs_postnet, converter_outputs, attn,
                     mel, y, input_lengths, checkpoint_dir, waveglow_path=waveglow_path, device=device)
                 tm.save_checkpoint(
                     model, optimizer, global_step, checkpoint_dir, global_epoch)
@@ -321,8 +328,11 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
                 else:
                     eval_model(global_step, writer, device, model, checkpoint_dir, ismultispeaker)
 
+        averaged_pre_mel_loss = running_pre_mel_loss / (len(data_loader))
+        averaged_post_mel_loss = running_post_mel_loss / (len(data_loader))
         averaged_loss = running_loss / (len(data_loader))
-        writer.add_scalar("loss (per epoch)", averaged_loss, global_epoch)
+        writer.add_scalar("pre_mel_loss (per epoch)", averaged_pre_mel_loss, global_epoch)
+        writer.add_scalar("post_mel_loss (per epoch)", averaged_post_mel_loss, global_epoch)
         print("Loss: {}".format(running_loss / (len(data_loader))))
 
         global_epoch += 1

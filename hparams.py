@@ -68,13 +68,13 @@ hparams = hparam_tf.hparam.HParams(
     # try setting larger value if you want to give very long text input
     max_positions=2048,
     dropout=1-0.95,
-    kernel_size=5,
-    text_embed_dim=256,
-    encoder_channels=64,
-    num_encoder_layer=7,
-    decoder_channels=256,
+    kernel_size=7, # default:5
+    text_embed_dim=512, # default:256
+    encoder_channels=128, # default:64
+    num_encoder_layer=9, # default:7
+    decoder_channels=512, # default:256
     num_decoder_layer=4,
-    attention_hidden=128,
+    attention_hidden=256, # default:128
     converter_channels=256,
     num_converter_layer=5,
     query_position_rate=1.0,
@@ -114,7 +114,7 @@ hparams = hparam_tf.hparam.HParams(
     # Eval:
     # this can be list for multple layers of attention
     # e.g., [True, False, False, False, True]
-    force_monotonic_attention=[False,True,False,False],
+    force_monotonic_attention=[False,False,False,False],
     # Attention constraint for incremental decoding
     window_ahead=3,
     # 0 tends to prevent word repretetion, but sometime causes skip words

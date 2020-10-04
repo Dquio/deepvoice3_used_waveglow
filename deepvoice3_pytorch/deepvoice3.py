@@ -266,6 +266,7 @@ class Decoder(nn.Module):
     def forward(self, encoder_out, inputs=None,
                 text_positions=None, frame_positions=None,
                 speaker_embed=None, lengths=None):
+        # inference
         if inputs is None:
             assert text_positions is not None
             self.start_fresh_sequence()
@@ -333,17 +334,28 @@ class Decoder(nn.Module):
 
         # project to mel-spectorgram
         outputs = torch.sigmoid(gate) * out
+
+        # postnet
+        num_glu = 5
+        outputs_postnet = outputs
+        for i in range(num_glu):
+            outputs_twice = torch.cat((outputs_postnet, outputs_postnet), 2)
+            outputs_postnet = F.glu(outputs_twice, dim=-1)
+
+        # Split by frame
         outputs = outputs.view(outputs.size(0),-1,self.in_dim)
+        outputs_postnet = outputs_postnet.view(outputs_postnet.size(0), -1, self.in_dim)
 
         # Done flag
         done = torch.sigmoid(self.fc(x))
 
 
+        return outputs, outputs_postnet, torch.stack(alignments), done, decoder_states
 
-        return outputs, torch.stack(alignments), done, decoder_states
-
+    # inference
     def incremental_forward(self, encoder_out, text_positions, speaker_embed=None,
                             initial_input=None, test_inputs=None):
+        # Get encoder output
         keys, values = encoder_out
         B = keys.size(0)
 
@@ -352,6 +364,7 @@ class Decoder(nn.Module):
 
         decoder_states = []
         outputs = []
+        outputs_postnet = []
         alignments = []
         dones = []
         # intially set to zeros
@@ -360,7 +373,9 @@ class Decoder(nn.Module):
             last_attended[idx] = 0 if v else None
 
         num_attention_layers = sum([layer is not None for layer in self.attention])
+
         t = 0
+        # Setting initial input
         if initial_input is None:
             initial_input = keys.data.new(B, 1, self.in_dim *self.r).zero_()
         current_input = initial_input
@@ -368,6 +383,7 @@ class Decoder(nn.Module):
             # frame pos start with 1.
             frame_pos = keys.data.new(B, 1).fill_(t + 1).long()
 
+            # Autoregressive
             if test_inputs is not None:
                 if t >= test_inputs.size(1):
                     break
@@ -426,8 +442,16 @@ class Decoder(nn.Module):
             output = torch.sigmoid(gate) * out
             done = torch.sigmoid(self.fc(x))
 
+            # postnet
+            num_glu = 5
+            output_postnet = output
+            for i in range(num_glu):
+                output_twice = torch.cat((output_postnet, output_postnet), 2)
+                output_postnet = F.glu(output_twice, dim=-1)
+
             decoder_states += [decoder_state]
             outputs += [output]
+            outputs_postnet += [output_postnet]
             alignments += [ave_alignment]
             dones += [done]
 
@@ -444,15 +468,18 @@ class Decoder(nn.Module):
         alignments = list(map(lambda x: x.squeeze(1), alignments))
         decoder_states = list(map(lambda x: x.squeeze(1), decoder_states))
         outputs = list(map(lambda x: x.squeeze(1), outputs))
+        outputs_postnet = list(map(lambda x: x.squeeze(1), outputs_postnet))
 
         # Combine outputs for all time steps
         alignments = torch.stack(alignments).transpose(0, 2)
         decoder_states = torch.stack(decoder_states).transpose(0, 1).contiguous()
         outputs = torch.stack(outputs).transpose(0, 1).contiguous()
         outputs = outputs.view(outputs.size(0),-1,self.in_dim)
+        outputs_postnet = torch.stack(outputs_postnet).transpose(0, 1).contiguous()
+        outputs_postnet = outputs_postnet.view(outputs_postnet.size(0), -1, self.in_dim)
 
 
-        return outputs, alignments, dones, decoder_states
+        return outputs, outputs_postnet, alignments, dones, decoder_states
 
     def start_fresh_sequence(self):
         _clear_modules(self.preattention)

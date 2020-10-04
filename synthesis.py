@@ -102,18 +102,22 @@ def tts_use_waveglow(model, text, waveglow, p=0, speaker_id=None, fast=True, den
     text_positions = torch.arange(1, sequence.size(-1) + 1).unsqueeze(0).long().to(device)
     speaker_ids = None if speaker_id is None else torch.LongTensor([speaker_id]).to(device)
 
-    # Greedy decoding
+    # Greedy decoding (postnet version)
     with torch.no_grad():
-        mel, alignments, done = model(
+        mel, mel_postnet, alignments, done = model(
             sequence, text_positions=text_positions, speaker_ids=speaker_ids)
         waveform = waveglow.infer(mel.transpose(1,2), sigma=0.6)
+        waveform_postnet = waveglow.infer(mel_postnet.transpose(1, 2), sigma=0.6)
     alignments = alignments[0].cpu().data.numpy()
     mel = mel[0].cpu().data.numpy()
+    mel_postnet = mel_postnet[0].cpu().data.numpy()
     if denoiser_strength > 0:
         waveform = denoiser(waveform, denoiser_strength).squeeze(0)
+        waveform_postnet = denoiser(waveform_postnet, denoiser_strength).squeeze(0)
     waveform = waveform[0].cpu().data.numpy()
+    waveform_postnet = waveform_postnet[0].cpu().data.numpy()
 
-    return waveform, alignments, mel
+    return waveform, waveform_postnet, alignments, mel, mel_postnet
 
 
 def _load(checkpoint_path):
