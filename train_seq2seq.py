@@ -217,6 +217,7 @@ def train(device, model, data_loader, optimizer, writer,
     r = hparams.outputs_per_step
     current_lr = init_lr
 
+    # loss function
     binary_criterion = nn.BCELoss()
     l1 = nn.L1Loss()
 
@@ -230,6 +231,7 @@ def train(device, model, data_loader, optimizer, writer,
         running_post_mel_loss = 0
         running_loss = 0.
         print("{}epoch:".format(global_epoch))
+
         for step, (x, input_lengths, mel, positions, done, target_lengths,
                    speaker_ids) \
                 in tqdm(enumerate(data_loader)):

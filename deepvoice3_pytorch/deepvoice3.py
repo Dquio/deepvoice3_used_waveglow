@@ -249,11 +249,42 @@ class Decoder(nn.Module):
                                position_weight=position_weight))
             in_channels = out_channels
 
+        # When increasing only convolution
+        # for i, (out_channels, kernel_size, dilation) in enumerate(convolutions):
+        #     assert in_channels == out_channels
+        #     num_decoder_conv_layer = 3
+        #     for i in range(num_decoder_conv_layer)
+        #         self.convolutions.append(
+        #             Conv1dGLU(n_speakers, speaker_embed_dim,
+        #                       in_channels, out_channels, kernel_size, causal=True,
+        #                       dilation=dilation, dropout=dropout, residual=True))
+        #     self.attention.append(
+        #         AttentionLayer(out_channels, embed_dim,attention_hidden,
+        #                        dropout=dropout,
+        #                        window_ahead=window_ahead,
+        #                        window_backward=window_backward,
+        #                        n_speakers=n_speakers, speaker_embed_dim=speaker_embed_dim,
+        #                        key_position_rate=key_position_rate, query_position_rate=query_position_rate,
+        #                        position_weight=position_weight))
+        #     in_channels = out_channels
+
         self.last_fc = Linear(in_channels,in_dim*r)
         self.gate_fc = Linear(in_channels,in_dim*r)
 
         # Mel-spectrogram (before sigmoid) -> Done binary flag
         self.fc = Linear(in_channels, 1)
+
+        # PostNet: GLU Layer
+        self.glu = nn.ModuleList()
+        num_glu = 5
+        in_channels = in_dim
+        out_channels = in_dim
+        dilation = 1
+        for i in range(num_glu):
+            self.glu.append(
+                Conv1dGLU(n_speakers, speaker_embed_dim,
+                          in_channels, out_channels, kernel_size, causal=False,
+                          dilation=dilation, dropout=dropout, residual=True))
 
         self.max_decoder_steps = 200
         self.min_decoder_steps = 10
@@ -334,17 +365,22 @@ class Decoder(nn.Module):
 
         # project to mel-spectorgram
         outputs = torch.sigmoid(gate) * out
-
-        # postnet
-        num_glu = 5
-        outputs_postnet = outputs
-        for i in range(num_glu):
-            outputs_twice = torch.cat((outputs_postnet, outputs_postnet), 2)
-            outputs_postnet = F.glu(outputs_twice, dim=-1)
-
         # Split by frame
         outputs = outputs.view(outputs.size(0),-1,self.in_dim)
-        outputs_postnet = outputs_postnet.view(outputs_postnet.size(0), -1, self.in_dim)
+
+        # B x T x C -> B x C x T
+        outputs_postnet = outputs
+        outputs_postnet = outputs_postnet.transpose(1, 2)
+
+        # postnet
+        for i, f in enumerate(self.glu):
+            outputs_postnet = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
+
+        # Back to B x T x C
+        outputs_postnet = outputs_postnet.transpose(1, 2)
+
+        # Skip Connection
+        outputs_postnet += outputs
 
         # Done flag
         done = torch.sigmoid(self.fc(x))
@@ -364,7 +400,6 @@ class Decoder(nn.Module):
 
         decoder_states = []
         outputs = []
-        outputs_postnet = []
         alignments = []
         dones = []
         # intially set to zeros
@@ -442,16 +477,8 @@ class Decoder(nn.Module):
             output = torch.sigmoid(gate) * out
             done = torch.sigmoid(self.fc(x))
 
-            # postnet
-            num_glu = 5
-            output_postnet = output
-            for i in range(num_glu):
-                output_twice = torch.cat((output_postnet, output_postnet), 2)
-                output_postnet = F.glu(output_twice, dim=-1)
-
             decoder_states += [decoder_state]
             outputs += [output]
-            outputs_postnet += [output_postnet]
             alignments += [ave_alignment]
             dones += [done]
 
@@ -468,15 +495,26 @@ class Decoder(nn.Module):
         alignments = list(map(lambda x: x.squeeze(1), alignments))
         decoder_states = list(map(lambda x: x.squeeze(1), decoder_states))
         outputs = list(map(lambda x: x.squeeze(1), outputs))
-        outputs_postnet = list(map(lambda x: x.squeeze(1), outputs_postnet))
 
         # Combine outputs for all time steps
         alignments = torch.stack(alignments).transpose(0, 2)
         decoder_states = torch.stack(decoder_states).transpose(0, 1).contiguous()
         outputs = torch.stack(outputs).transpose(0, 1).contiguous()
         outputs = outputs.view(outputs.size(0),-1,self.in_dim)
-        outputs_postnet = torch.stack(outputs_postnet).transpose(0, 1).contiguous()
-        outputs_postnet = outputs_postnet.view(outputs_postnet.size(0), -1, self.in_dim)
+
+        # B x T x C -> B x C x T
+        outputs_postnet = outputs
+        outputs_postnet = outputs_postnet.transpose(1, 2)
+
+        # postnet
+        for i, f in enumerate(self.glu):
+            outputs_postnet = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
+
+        # Back to B x T x C
+        outputs_postnet = outputs_postnet.transpose(1, 2)
+
+        # Skip Connection
+        outputs_postnet += outputs
 
 
         return outputs, outputs_postnet, alignments, dones, decoder_states
