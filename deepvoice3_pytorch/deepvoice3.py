@@ -294,7 +294,8 @@ class Decoder(nn.Module):
         else:
             self.force_monotonic_attention = force_monotonic_attention
 
-    def forward(self, encoder_out, inputs=None,
+    def forward(self, encoder_out, # keys and values
+                inputs=None, # inputs mel spectrogram
                 text_positions=None, frame_positions=None,
                 speaker_embed=None, lengths=None):
         # inference
@@ -380,7 +381,7 @@ class Decoder(nn.Module):
         outputs_postnet = outputs_postnet.transpose(1, 2)
 
         # Skip Connection
-        outputs_postnet += outputs
+        # outputs_postnet += outputs
 
         # Done flag
         done = torch.sigmoid(self.fc(x))
@@ -514,7 +515,7 @@ class Decoder(nn.Module):
         outputs_postnet = outputs_postnet.transpose(1, 2)
 
         # Skip Connection
-        outputs_postnet += outputs
+        # outputs_postnet += outputs
 
 
         return outputs, outputs_postnet, alignments, dones, decoder_states
