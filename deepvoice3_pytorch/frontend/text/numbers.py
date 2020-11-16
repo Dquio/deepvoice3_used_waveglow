@@ -60,12 +60,18 @@ def _expand_number(m):
     else:
         return _inflect.number_to_words(num, andword='')
 
-
+# Main function
 def normalize_numbers(text):
+    # Remove comma
     text = re.sub(_comma_number_re, _remove_commas, text)
+    # Convert pounds
     text = re.sub(_pounds_re, r'\1 pounds', text)
+    # Convert dollars
     text = re.sub(_dollars_re, _expand_dollars, text)
+    # Convert decimal number (小数点)
     text = re.sub(_decimal_number_re, _expand_decimal_point, text)
+    # number to word
     text = re.sub(_ordinal_re, _expand_ordinal, text)
     text = re.sub(_number_re, _expand_number, text)
+
     return text

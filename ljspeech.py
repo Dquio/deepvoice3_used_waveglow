@@ -8,7 +8,7 @@ import librosa
 
 import time
 
-
+# Main function
 def build_from_path(in_dir, out_dir, num_workers=1, tqdm=lambda x: x):
     '''Preprocesses the LJ Speech dataset from a given input path into a given output directory.
 
@@ -25,13 +25,20 @@ def build_from_path(in_dir, out_dir, num_workers=1, tqdm=lambda x: x):
     # We use ProcessPoolExecutor to parallize across processes. This is just an optimization and you
     # can omit it and just call _process_utterance on each input if you want.
     executor = ProcessPoolExecutor(max_workers=num_workers)
+
     futures = []
     index = 1
+    # Read the Excel file of the original data
     with open(os.path.join(in_dir, 'metadata.csv'), encoding='utf-8') as f:
         for line in f:
+            # Split into audio file name and text
             parts = line.strip().split('|')
+            #　Get the path of the audio file
             wav_path = os.path.join(in_dir, 'wavs', '%s.wav' % parts[0])
+            # Todo: parts[1]には何が格納されているのかを調査する
+            # Get text
             text = parts[2]
+            # If the text is too short, start the next iteration
             if len(text) < hparams.min_text:
                 continue
             futures.append(executor.submit(
@@ -40,6 +47,7 @@ def build_from_path(in_dir, out_dir, num_workers=1, tqdm=lambda x: x):
     return [future.result() for future in tqdm(futures)]
 
 
+# Specific preprocessing function
 def _process_utterance(out_dir, index, wav_path, text):
     '''Preprocesses a single utterance audio/text pair.
 
@@ -57,18 +65,27 @@ def _process_utterance(out_dir, index, wav_path, text):
     '''
 
     # Load the audio to a numpy array:
-
     wav = audio.load_wav(wav_path)
 
+    # scaling (Not currently done)
     if hparams.rescaling:
         wav = wav / np.abs(wav).max() * hparams.rescaling_max
 
     #wav = audio.preemphasis(wav)
+
+
     #melはパワースペクトラムで計算しない(power=1.0がそれ)
+    # compute a mel-scaled spectrogram
+    # Todo: powerでは何を指定できるのかを調査
+    # Todo: パワースペクトルとエネルギースペクトルの違いを調査
     mel_spectrogram = librosa.feature.melspectrogram(wav, n_fft=1024,hop_length=256,n_mels=80,fmin=0.0,fmax=8000,power=1.0)
+    # take logarithm and clipping process
+    # Todo: 絶対値に変換する意味を調査
     mel_spectrogram = np.log(np.abs(mel_spectrogram).clip(1e-5,10)).astype(np.float32)
+    # get the series length
     n_frames = mel_spectrogram.shape[1]
     world_frames = 1
+
     '''
     # Compute the linear-scale spectrogram from the wav:
     spectrogram = audio.spectrogram(wav).astype(np.float32)
@@ -76,15 +93,16 @@ def _process_utterance(out_dir, index, wav_path, text):
 
     # Compute a mel-scale spectrogram from the wav:
     mel_spectrogram = audio.melspectrogram(wav).astype(np.float32)
-
-    
-    #world parameters
-    f0,sp,ap = audio.world(wav,hparams.sample_rate)
-    f0 = (f0 / hparams.f0_norm).astype(np.float32) #normalize
-    sp = audio._normalize(sp).astype(np.float32)
-    ap = ap.astype(np.float32) #apは0~1の範囲しか値を取らないので正規化不要
-    world_frames = f0.shape[0]
     '''
+
+    # world parameters
+    f0, sp, ap = audio.world(wav, hparams.sample_rate)
+    f0 = (f0 / hparams.f0_norm).astype(np.float32)  # normalize
+    # sp = audio._normalize(sp).astype(np.float32)
+    # ap = ap.astype(np.float32)  # apは0~1の範囲しか値を取らないので正規化不要
+    # get the series length
+    world_frames = f0.shape[0]
+
 
 
 
@@ -98,7 +116,7 @@ def _process_utterance(out_dir, index, wav_path, text):
     ap_filename = 'ljspeech-ap-%05d.npy' % index
     #np.save(os.path.join(out_dir, spectrogram_filename), spectrogram.T, allow_pickle=False)
     np.save(os.path.join(out_dir, mel_filename), mel_spectrogram.T, allow_pickle=False)
-    #np.save(os.path.join(out_dir, f0_filename), f0, allow_pickle=False)
+    np.save(os.path.join(out_dir, f0_filename), f0, allow_pickle=False)
     #np.save(os.path.join(out_dir, sp_filename), sp, allow_pickle=False)
     #np.save(os.path.join(out_dir, ap_filename), ap, allow_pickle=False)
     

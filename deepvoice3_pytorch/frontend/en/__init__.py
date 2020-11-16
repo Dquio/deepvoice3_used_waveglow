@@ -10,6 +10,8 @@ n_vocab = len(symbols)
 _arpabet = nltk.corpus.cmudict.dict()
 
 
+# Todo: 具体的な処理を理解する
+# Acquisition of phonemes using nltk
 def _maybe_get_arpabet(word, p):
     #if word contains punctuation, it cannot change phonemes.
     #e.g. word='Printing,' cannot change, but word='Printing' can change phonemes
@@ -30,18 +32,27 @@ def _maybe_get_arpabet(word, p):
     return phonemes if random() < p else word
 
 
+# Convert part of text to phonemes
 def mix_pronunciation(text, p):
     #text = '%'.join(word for word in text.split(', '))
     text = ' '.join(_maybe_get_arpabet(word, p) for word in text.split(' '))
     return text
 
 
+# Main function
+# text processing
 def text_to_sequence(text, p=0.0):
+    # Replace specific characters
     text = normalize_numbers(text)
     text = text.replace('\r', '')
+    # If the last character is not '!,.:;?', add '.'
     text = text + '.' if text[-1] not in '!,.:;?' else text
+
+    # Convert part of text to phonemes
     if p >= 0:
         text = mix_pronunciation(text, p)
+
+    # text to IDs
     from deepvoice3_pytorch.frontend.text import text_to_sequence
     text = text_to_sequence(text, ["english_cleaners"])
     return text

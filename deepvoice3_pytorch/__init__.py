@@ -158,10 +158,10 @@ class MultispeakerSeq2seq(nn.Module):
 
         # Apply seq2seq (postnet version)
         # (B, T//r, mel_dim*r)
-        mel_outputs, mel_outputs_postnet, alignments, done, decoder_states = self.seq2seq(
+        mel_outputs, mel_outputs_postnet, f0_outputs, alignments, done, decoder_states = self.seq2seq(
             text_sequences, mel_targets, speaker_embed,
             text_positions, frame_positions, input_lengths)
-        return mel_outputs, mel_outputs_postnet, alignments, done
+        return mel_outputs, mel_outputs_postnet, f0_outputs, alignments, done
 
 
 class AttentionSeq2Seq(nn.Module):
@@ -186,9 +186,9 @@ class AttentionSeq2Seq(nn.Module):
         # Mel: (B, T//r, mel_dim*r)
         # Alignments: (N, B, T_target, T_input)
         # Done: (B, T//r, 1)
-        mel_outputs, mel_outputs_postnet, alignments, done, decoder_states = self.decoder(
+        mel_outputs, mel_outputs_postnet, f0_outputs, alignments, done, decoder_states = self.decoder(
             encoder_outputs, mel_targets,
             text_positions=text_positions, frame_positions=frame_positions,
             speaker_embed=speaker_embed, lengths=input_lengths)
 
-        return mel_outputs, mel_outputs_postnet, alignments, done, decoder_states
+        return mel_outputs, mel_outputs_postnet, f0_outputs, alignments, done, decoder_states

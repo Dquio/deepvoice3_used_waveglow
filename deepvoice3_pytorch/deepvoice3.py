@@ -276,7 +276,7 @@ class Decoder(nn.Module):
 
         # PostNet: GLU Layer
         self.glu = nn.ModuleList()
-        num_glu = 5
+        num_glu = 4
         in_channels = in_dim
         out_channels = in_dim
         dilation = 1
@@ -285,6 +285,20 @@ class Decoder(nn.Module):
                 Conv1dGLU(n_speakers, speaker_embed_dim,
                           in_channels, out_channels, kernel_size, causal=False,
                           dilation=dilation, dropout=dropout, residual=True))
+        self.post_convolution = Conv1dGLU(n_speakers, speaker_embed_dim,
+                                          in_channels, out_channels, kernel_size, causal=False,
+                                          dilation=dilation, dropout=dropout, residual=True)
+
+        # World parameter
+        self.f0_convolution = Conv1dGLU(n_speakers, speaker_embed_dim,
+                                        in_channels, out_channels, kernel_size, causal=False,
+                                        dilation=dilation, dropout=dropout, residual=True)
+        self.f0_fc = Linear(in_channels, in_channels * self.r)
+        self.upsample = nn.Upsample(scale_factor=2.5)
+        self.world = Conv1dGLU(n_speakers, speaker_embed_dim,
+                          in_channels, out_channels, kernel_size, causal=False,
+                          dilation=dilation, dropout=dropout, residual=True)
+        self.f0 = Linear(in_channels, 1)
 
         self.max_decoder_steps = 200
         self.min_decoder_steps = 10
@@ -358,6 +372,7 @@ class Decoder(nn.Module):
         # decoder state (B x T x C):
         # internal representation before compressed to output dimention
         decoder_states = x.transpose(1, 2).contiguous()
+        decoder_states_size = decoder_states.size()
 
         # Back to B x T x C
         x = x.transpose(1, 2)
@@ -375,7 +390,21 @@ class Decoder(nn.Module):
 
         # postnet
         for i, f in enumerate(self.glu):
-            outputs_postnet = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
+            postnet_states = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
+
+        # f0:
+        f0 = self.f0_convolution(postnet_states) # 16,80,836
+        f0_size = f0.size()
+        f0 = f0.transpose(1, 2) # 16,836,80
+        # f0 = self.f0_fc(f0) # 16,836,320
+        # f0 = f0.view(f0.size(0), -1, f0.size(-1)//self.r) # 16,3344,80
+        f0 = self.upsample(f0.transpose(1, 2)) # 16,80,8360
+        f0 = self.world(f0, speaker_embed) # 16,80,8360
+        f0 = f0.transpose(1, 2) # 16,8360,80
+        f0 = self.f0(f0) # 16,8360,1
+
+        #postnet mel spectrogram:
+        outputs_postnet = self.post_convolution(postnet_states)
 
         # Back to B x T x C
         outputs_postnet = outputs_postnet.transpose(1, 2)
@@ -387,7 +416,7 @@ class Decoder(nn.Module):
         done = torch.sigmoid(self.fc(x))
 
 
-        return outputs, outputs_postnet, torch.stack(alignments), done, decoder_states
+        return outputs, outputs_postnet, f0[:,:,0], torch.stack(alignments), done, decoder_states
 
     # inference
     def incremental_forward(self, encoder_out, text_positions, speaker_embed=None,
@@ -509,7 +538,20 @@ class Decoder(nn.Module):
 
         # postnet
         for i, f in enumerate(self.glu):
-            outputs_postnet = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
+            postnet_states = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
+
+        # f0:
+        f0 = self.f0_convolution(postnet_states)
+        f0 = f0.transpose(1, 2)
+        f0 = self.f0_fc(f0)
+        f0 = f0.view(f0.size(0), -1, f0.size(-1) // self.r)
+        f0 = self.upsample(f0.transpose(1, 2))
+        f0 = self.world(f0, speaker_embed)
+        f0 = f0.transpose(1, 2)
+        f0 = self.f0(f0)
+
+        # postnet mel spectrogram:
+        outputs_postnet = self.post_convolution(postnet_states)
 
         # Back to B x T x C
         outputs_postnet = outputs_postnet.transpose(1, 2)
@@ -518,7 +560,7 @@ class Decoder(nn.Module):
         # outputs_postnet += outputs
 
 
-        return outputs, outputs_postnet, alignments, dones, decoder_states
+        return outputs, outputs_postnet, f0[:,:,0], alignments, dones, decoder_states
 
     def start_fresh_sequence(self):
         _clear_modules(self.preattention)
@@ -561,11 +603,14 @@ class Converter(nn.Module):
         # Generic case: B x T x C -> B x C x T
         x = x.transpose(1, 2)
 
+        # convolution layer
         for f in self.convolutions:
             x = f(x, speaker_embed) if isinstance(f, Conv1dGLU) else f(x)
 
         # Back to B x T x C
         x = x.transpose(1, 2)
+
+        # Todo: この全結合層の役割を調査
         x = self.fc(x)
 
         return x.view(x.size(0), -1, x.size(-1)//self.r)
@@ -603,8 +648,12 @@ class WorldConverter(nn.Module):
         self.ap = Linear(in_channels, out_dim)
 
     def forward(self, x, speaker_embed=None):
+        # convolution and fc layer
         x = self.conv_block(x, speaker_embed)
+        # Todo: このアップサンプリングで何が起こっているのかを調査
+        # Todo: このアップサンプリングの意義を調査
         x = self.upsample(x.transpose(1,2))
+
         x = self.world(x, speaker_embed)
         x = x.transpose(1,2)
 

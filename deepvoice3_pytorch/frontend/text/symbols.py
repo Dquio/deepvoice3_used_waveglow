@@ -8,6 +8,7 @@ from .cmudict import valid_symbols
 
 _pad = '_'
 _eos = '~'
+# Todo: 論文通りにすべての英字を大文字に変換していない理由を調査
 _characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!\'(),-.:;?% '
 
 # Prepend "@" to ARPAbet symbols to ensure uniqueness (some are the same as uppercase letters):

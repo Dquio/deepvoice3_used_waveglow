@@ -104,7 +104,7 @@ def tts_use_waveglow(model, text, waveglow, p=0, speaker_id=None, fast=True, den
 
     # Greedy decoding (postnet version)
     with torch.no_grad():
-        mel, mel_postnet, alignments, done = model(
+        mel, mel_postnet, f0, alignments, done = model(
             sequence, text_positions=text_positions, speaker_ids=speaker_ids)
         waveform = waveglow.infer(mel.transpose(1,2), sigma=0.6)
         waveform_postnet = waveglow.infer(mel_postnet.transpose(1, 2), sigma=0.6)

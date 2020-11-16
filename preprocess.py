@@ -19,8 +19,11 @@ from hparams import hparams, hparams_debug_string
 
 
 def preprocess(mod, in_dir, out_dir, num_workers):
+    # Creating a directory
     os.makedirs(out_dir, exist_ok=True)
+    # Dataset preprocessing
     metadata = mod.build_from_path(in_dir, out_dir, num_workers, tqdm=tqdm)
+    # Writing processed dataset
     write_metadata(metadata, out_dir)
 
 
@@ -55,6 +58,7 @@ if __name__ == "__main__":
     if preset is not None:
         with open(preset) as f:
             hparams.parse_json(f.read())
+
     # Override hyper parameters
     hparams.parse(args["--hparams"])
     assert hparams.name == "deepvoice3"

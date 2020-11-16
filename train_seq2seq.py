@@ -54,7 +54,7 @@ from matplotlib import cm
 from warnings import warn
 from hparams import hparams, hparams_debug_string
 import training_module as tm
-from training_module import TextDataSource, MelSpecDataSource
+from training_module import TextDataSource, MelSpecDataSource, F0DataSource
 
 global_step = 0
 global_epoch = 0
@@ -65,18 +65,19 @@ if use_cuda:
 _frontend = None  # to be set later
 
 class PyTorchDataset(object):
-    def __init__(self, X, Mel):
+    def __init__(self, X, Mel, F0):
         self.X = X
         self.Mel = Mel
+        self.F0 = F0
         # alias
         self.multi_speaker = X.file_data_source.multi_speaker
 
     def __getitem__(self, idx):
         if self.multi_speaker:
             text, speaker_id = self.X[idx]
-            return text, self.Mel[idx], speaker_id
+            return text, self.Mel[idx], self.F0[idx], speaker_id
         else:
-            return self.X[idx], self.Mel[idx]
+            return self.X[idx], self.Mel[idx], self.F0[idx]
 
 
     def __len__(self):
@@ -86,7 +87,7 @@ class PyTorchDataset(object):
 def collate_fn(batch):
     """Create batch"""
     r = hparams.outputs_per_step
-    multi_speaker = len(batch[0]) == 3
+    multi_speaker = len(batch[0]) == 4
 
     # Lengths
     input_lengths = [len(x[0]) for x in batch]
@@ -94,6 +95,8 @@ def collate_fn(batch):
 
     target_lengths = [len(x[1]) for x in batch]
     max_target_len = max(target_lengths)
+
+    world_lengths = [len(x[2]) for x in batch]
 
     if max_input_len % r != 0:
         max_input_len += r - max_input_len % r
@@ -107,17 +110,23 @@ def collate_fn(batch):
     # imitates initial decoder states
     b_pad = r
     max_target_len += b_pad
+    # Todo: なぜアップサンプリングしているのかを調査
+    max_world_len = int(max_target_len * hparams.world_upsample)
 
     a = np.array([tm._pad(x[0], max_input_len) for x in batch], dtype=np.int)
     x_batch = torch.LongTensor(a)
 
     input_lengths = torch.LongTensor(input_lengths)
     target_lengths = torch.LongTensor(target_lengths)
+    world_lengths = torch.LongTensor(world_lengths)
 
     b = np.array([tm._pad_2d(x[1], max_target_len, b_pad=b_pad) for x in batch],
                  dtype=np.float32)
     mel_batch = torch.FloatTensor(b)
 
+    rw = int(r * hparams.world_upsample)
+    d = np.array([np.pad(x[2], (rw, max_world_len - len(x[2]) - rw), mode="constant") for x in batch], dtype=np.float32)
+    f0_batch = torch.FloatTensor(d)
 
     # text positions
     text_positions = np.array([tm._pad(np.arange(1, len(x[0]) + 1), max_input_len)
@@ -140,10 +149,11 @@ def collate_fn(batch):
     done = torch.FloatTensor(done).unsqueeze(-1)
 
     if multi_speaker:
-        speaker_ids = torch.LongTensor([x[2] for x in batch])
+        speaker_ids = torch.LongTensor([x[3] for x in batch])
     else:
         speaker_ids = None
-    return x_batch, input_lengths, mel_batch, \
+
+    return x_batch, input_lengths, mel_batch, f0_batch, \
         (text_positions, frame_positions), done, target_lengths, speaker_ids
 
 
@@ -227,12 +237,13 @@ def train(device, model, data_loader, optimizer, writer,
 
     global global_step, global_epoch
     while global_epoch < nepochs:
+        running_f0_loss = 0.
         running_pre_mel_loss = 0.
         running_post_mel_loss = 0
         running_loss = 0.
         print("{}epoch:".format(global_epoch))
 
-        for step, (x, input_lengths, mel, positions, done, target_lengths,
+        for step, (x, input_lengths, mel, f0, positions, done, target_lengths,
                    speaker_ids) \
                 in tqdm(enumerate(data_loader)):
             model.train()
@@ -265,12 +276,13 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             x = x.to(device)
             text_positions = text_positions.to(device)
             frame_positions = frame_positions.to(device)
+            f0 = f0.to(device)
             mel, done = mel.to(device), done.to(device)
             target_lengths = target_lengths.to(device)
             speaker_ids = speaker_ids.to(device) if ismultispeaker else None
 
             # model output (postnet version)
-            mel_outputs, mel_outputs_postnet, attn, done_hat = model(
+            mel_outputs, mel_outputs_postnet, f0_outputs, attn, done_hat = model(
                 x, mel, speaker_ids=speaker_ids,
                 text_positions=text_positions, frame_positions=frame_positions,
                 input_lengths=input_lengths)
@@ -279,12 +291,18 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             mel_outputs_postnet = mel_outputs_postnet.view(len(mel), -1, mel.size(-1))
 
             # Losses
+            # mel:
             mel_loss = l1(mel_outputs[:, :-r, :], mel[:, r:, :])
             mel_postnet_loss = l1(mel_outputs_postnet[:, :-r, :], mel[:, r:, :])
             # done:
             done_loss = binary_criterion(done_hat, done)
-            #combine Losses
-            loss = mel_loss + mel_postnet_loss + done_loss
+            # f0:
+            rw = int(r * hparams.world_upsample)
+            original_f0_size = f0.size()
+            f0_size = f0_outputs.size()
+            f0_loss = l1(f0_outputs[:, :-rw], f0[:, rw:])
+            # combine Losses
+            loss = mel_loss + mel_postnet_loss + done_loss + f0_loss
 
             if global_epoch == 0 and global_step == 0:
                 tm.save_states(
@@ -304,15 +322,17 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             optimizer.step()
 
             # Logs
-            writer.add_scalar("loss", float(loss.item()), global_step)
+            # writer.add_scalar("loss", float(loss.item()), global_step)
             writer.add_scalar("done_loss", float(done_loss.item()), global_step)
-            writer.add_scalar("mel_l1_loss (pre)", float(mel_loss.item()), global_step)
-            writer.add_scalar("mel_l1_loss (post)", float(mel_postnet_loss.item()), global_step)
+            # writer.add_scalar("mel_l1_loss (pre)", float(mel_loss.item()), global_step)
+            # writer.add_scalar("mel_l1_loss (post)", float(mel_postnet_loss.item()), global_step)
+            # writer.add_scalar("f0_l1_loss", float(f0_loss.item()), global_step)
             if clip_thresh > 0:
                 writer.add_scalar("gradient norm", grad_norm, global_step)
             writer.add_scalar("learning rate", current_lr, global_step)
 
             global_step += 1
+            running_f0_loss += f0_loss.item()
             running_pre_mel_loss += mel_loss.item()
             running_post_mel_loss += mel_postnet_loss.item()
             running_loss += loss.item()
@@ -330,11 +350,14 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
                 else:
                     eval_model(global_step, writer, device, model, checkpoint_dir, ismultispeaker)
 
+        averaged_f0_loss = running_f0_loss / (len(data_loader))
         averaged_pre_mel_loss = running_pre_mel_loss / (len(data_loader))
         averaged_post_mel_loss = running_post_mel_loss / (len(data_loader))
         averaged_loss = running_loss / (len(data_loader))
-        writer.add_scalar("pre_mel_loss (per epoch)", averaged_pre_mel_loss, global_epoch)
-        writer.add_scalar("post_mel_loss (per epoch)", averaged_post_mel_loss, global_epoch)
+        writer.add_scalar("f0_loss (per epoch)", averaged_f0_loss, global_epoch)
+        writer.add_scalar("mel_loss (per epoch)", averaged_pre_mel_loss, global_epoch)
+        writer.add_scalar("mel_loss_p (per epoch)", averaged_post_mel_loss, global_epoch)
+        writer.add_scalar("loss (per epoch)", averaged_loss, global_epoch)
         print("Loss: {}".format(running_loss / (len(data_loader))))
 
         global_epoch += 1
@@ -375,13 +398,17 @@ if __name__ == "__main__":
     assert hparams.name == "deepvoice3"
     print(hparams_debug_string())
 
+    # Specify preprocessing function (Depends on language)
     _frontend = getattr(frontend, hparams.frontend)
 
+    # Creating a checkpoint directory
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     # Input dataset definitions
+    # Todo: FilesourceDatasetで何が行われているのかを調査
     X = FileSourceDataset(TextDataSource(data_root, speaker_id))
     Mel = FileSourceDataset(MelSpecDataSource(data_root, speaker_id))
+    F0 = FileSourceDataset(F0DataSource(data_root, speaker_id))
 
     # Prepare sampler
     frame_lengths = Mel.file_data_source.frame_lengths
@@ -389,12 +416,11 @@ if __name__ == "__main__":
         frame_lengths, batch_size=hparams.batch_size)
 
     # Dataset and Dataloader setup
-    dataset = PyTorchDataset(X, Mel)
+    dataset = PyTorchDataset(X, Mel, F0)
     data_loader = data_utils.DataLoader(
         dataset, batch_size=hparams.batch_size,
         num_workers=hparams.num_workers, sampler=sampler,
         collate_fn=collate_fn, pin_memory=hparams.pin_memory)
-
 
     device = torch.device("cuda" if use_cuda else "cpu")
 

@@ -12,6 +12,9 @@ import lws
 #mel,linear spectrogramからプリエンファシスを排除
 
 
+# Load an audio file as a floating point time series.
+# audio will be automatically resampled to the given rate
+# return np.ndarray[]
 def load_wav(path):
     return librosa.core.load(path, sr=hparams.sample_rate)[0]
 
@@ -58,6 +61,7 @@ def melspectrogram(y):
 def _lws_processor():
     return lws.lws(hparams.fft_size, hparams.hop_size, mode="speech")
 
+# World vocoder
 def world(data,fs):
     f0,sp,ap = pw.wav2world(data.astype(float),fs)
     sp = librosa.power_to_db(np.abs(sp)) - hparams.sp_ref_level_db

@@ -11,6 +11,8 @@ _id_to_symbol = {i: s for i, s in enumerate(symbols)}
 _curly_re = re.compile(r'(.*?)\{(.+?)\}(.*)')
 
 
+# Main function
+# text to IDs
 def text_to_sequence(text, cleaner_names):
     '''Converts a string of text to a sequence of IDs corresponding to the symbols in the text.
 

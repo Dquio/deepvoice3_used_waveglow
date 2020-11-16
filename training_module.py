@@ -89,6 +89,7 @@ def plot_alignment(alignment, path, info=None):
     plt.close()
 
 
+# text preprocessing
 class TextDataSource(FileDataSource):
     def __init__(self, data_root, speaker_id=None):
         self.data_root = data_root
@@ -98,13 +99,18 @@ class TextDataSource(FileDataSource):
         self.speaker_id = speaker_id
 
     def collect_files(self):
-        meta = join(self.data_root, "train.txt") 
+        # Get the path of processed data
+        meta = join(self.data_root, "train.txt")
         with open(meta, "rb") as f:
             lines = f.readlines()
+
+        # Todo: なぜ先頭しか取得していないのかを調査
         l = lines[0].decode("utf-8").split("|")
         assert len(l) == 8 or len(l) == 9
         self.multi_speaker = len(l) == 9
+        # Get text
         texts = list(map(lambda l: l.decode("utf-8").split("|")[7], lines))
+
         if self.multi_speaker:
             speaker_ids = list(map(lambda l: int(l.decode("utf-8").split("|")[-1]), lines))
             # Filter by speaker_id
@@ -124,9 +130,11 @@ class TextDataSource(FileDataSource):
             text, speaker_id = args
         else:
             text = args[0]
+
         global _frontend
         if _frontend is None:
             _frontend = getattr(frontend, hparams.frontend)
+        # text processing
         seq = _frontend.text_to_sequence(text, p=hparams.replace_pronunciation_prob)
 
         if platform.system() == "Windows":
@@ -142,8 +150,12 @@ class TextDataSource(FileDataSource):
             return np.asarray(seq, dtype=np.int32)
 
 
+# audio preprocessing
 class _NPYDataSource(FileDataSource):
-    def __init__(self, data_root, col, speaker_id=None):
+    def __init__(self,
+                 data_root, # Where the original data is stored
+                 col, # Specify acoustic features
+                 speaker_id=None):
         self.data_root = data_root
         self.col = col
         self.frame_lengths = []
@@ -151,17 +163,25 @@ class _NPYDataSource(FileDataSource):
         self.speaker_id = speaker_id
 
     def collect_files(self):
+        # Get the path of processed data
         meta = join(self.data_root, "train.txt")
+        # Get the contents of train.txt as a list line by line
         with open(meta, "rb") as f:
             lines = f.readlines()
+
+        # Specify the character code as utf-8 and divide it with "|"
         l = lines[0].decode("utf-8").split("|")
         assert len(l) == 8 or len(l) == 9
         multi_speaker = len(l) == 9
+
+        # Obtain the series length of the mel spectrogram
         self.frame_lengths = list(
             map(lambda l: int(l.decode("utf-8").split("|")[2]), lines))
+        # Obtain the series length of the mel spectrogram
         self.world_lengths = list(
             map(lambda l: int(l.decode("utf-8").split("|")[6]), lines))
 
+        # Get the path of acoustic features
         paths = list(map(lambda l: l.decode("utf-8").split("|")[self.col], lines))
         paths = list(map(lambda f: join(self.data_root, f), paths))
 
@@ -180,18 +200,20 @@ class _NPYDataSource(FileDataSource):
     def collect_features(self, path):
         return np.load(path)
 
-
+# Get the melspectrogram
 class MelSpecDataSource(_NPYDataSource):
     def __init__(self, data_root, speaker_id=None):
         super(MelSpecDataSource, self).__init__(data_root, 1, speaker_id)
-
 
 class LinearSpecDataSource(_NPYDataSource):
     def __init__(self, data_root, speaker_id=None):
         super(LinearSpecDataSource, self).__init__(data_root, 0, speaker_id)
 
+# Get the fundamental frequency
 class F0DataSource(_NPYDataSource):
-    def __init__(self, data_root, speaker_id=None):
+    def __init__(self,
+                 data_root, # Where the original data is stored
+                 speaker_id=None):
         super(F0DataSource, self).__init__(data_root, 3, speaker_id)
 
 class SpDataSource(_NPYDataSource):
