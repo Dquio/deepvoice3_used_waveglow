@@ -6,7 +6,7 @@
 3. 処理を行いF0,Mel,Doneそれぞれの次元に投影する
 4. F0をアップサンプリングする
 
-1. [arXiv:1710.07654](https://arxiv.org/abs/1710.07654): Deep Voice 3: Scaling Text-to-Speech with Convolutional Sequence Learning.
+[arXiv:1710.07654](https://arxiv.org/abs/1710.07654): Deep Voice 3: Scaling Text-to-Speech with Convolutional Sequence Learning.
 
 # use_waveglow Repository
 
