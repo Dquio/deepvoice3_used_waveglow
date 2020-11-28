@@ -281,9 +281,14 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             target_lengths = target_lengths.to(device)
             speaker_ids = speaker_ids.to(device) if ismultispeaker else None
 
+            # f0_size = f0.size()
+            # np.savetxt("np_f0_input.txt", f0.to('cpu').detach().numpy().copy())
+            # f0 = f0.to(device)
+            # mel_size = mel.size()
+
             # model output (postnet version)
             mel_outputs, mel_outputs_postnet, f0_outputs, attn, done_hat = model(
-                x, mel, speaker_ids=speaker_ids,
+                x, mel, f0, speaker_ids=speaker_ids,
                 text_positions=text_positions, frame_positions=frame_positions,
                 input_lengths=input_lengths)
             # reshape
@@ -298,9 +303,11 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             done_loss = binary_criterion(done_hat, done)
             # f0:
             rw = int(r * hparams.world_upsample)
-            original_f0_size = f0.size()
-            f0_size = f0_outputs.size()
             f0_loss = l1(f0_outputs[:, :-rw], f0[:, rw:])
+            # np.savetxt("np_f0_origin.txt", f0.to('cpu').detach().numpy().copy())
+            # np.savetxt("np_f0_output.txt", f0_outputs.to('cpu').detach().numpy().copy())
+            # f0 = f0.to(device)
+            # f0_outputs = f0_outputs.to(device)
             # combine Losses
             loss = mel_loss + mel_postnet_loss + done_loss + f0_loss
 
@@ -356,7 +363,7 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
         averaged_loss = running_loss / (len(data_loader))
         writer.add_scalar("f0_loss (per epoch)", averaged_f0_loss, global_epoch)
         writer.add_scalar("mel_loss (per epoch)", averaged_pre_mel_loss, global_epoch)
-        writer.add_scalar("mel_loss_p (per epoch)", averaged_post_mel_loss, global_epoch)
+        writer.add_scalar("mel_loss_post (per epoch)", averaged_post_mel_loss, global_epoch)
         writer.add_scalar("loss (per epoch)", averaged_loss, global_epoch)
         print("Loss: {}".format(running_loss / (len(data_loader))))
 

@@ -144,7 +144,7 @@ class MultispeakerSeq2seq(nn.Module):
 
         return (p for p in self.parameters() if id(p) not in freezed_param_ids)
 
-    def forward(self, text_sequences, mel_targets=None, speaker_ids=None,
+    def forward(self, text_sequences, mel_targets=None, f0_targets=None, speaker_ids=None,
                 text_positions=None, frame_positions=None, input_lengths=None):
         B = text_sequences.size(0)
 
@@ -159,7 +159,7 @@ class MultispeakerSeq2seq(nn.Module):
         # Apply seq2seq (postnet version)
         # (B, T//r, mel_dim*r)
         mel_outputs, mel_outputs_postnet, f0_outputs, alignments, done, decoder_states = self.seq2seq(
-            text_sequences, mel_targets, speaker_embed,
+            text_sequences, mel_targets, f0_targets, speaker_embed,
             text_positions, frame_positions, input_lengths)
         return mel_outputs, mel_outputs_postnet, f0_outputs, alignments, done
 
@@ -176,7 +176,7 @@ class AttentionSeq2Seq(nn.Module):
             self.encoder.num_attention_layers = sum(
                 [layer is not None for layer in decoder.attention])
 
-    def forward(self, text_sequences, mel_targets=None, speaker_embed=None,
+    def forward(self, text_sequences, mel_targets=None, f0_targets=None, speaker_embed=None,
                 text_positions=None, frame_positions=None, input_lengths=None):
         # (B, T, text_embed_dim)
         encoder_outputs = self.encoder(
@@ -187,7 +187,7 @@ class AttentionSeq2Seq(nn.Module):
         # Alignments: (N, B, T_target, T_input)
         # Done: (B, T//r, 1)
         mel_outputs, mel_outputs_postnet, f0_outputs, alignments, done, decoder_states = self.decoder(
-            encoder_outputs, mel_targets,
+            encoder_outputs, mel_targets, f0_targets,
             text_positions=text_positions, frame_positions=frame_positions,
             speaker_embed=speaker_embed, lengths=input_lengths)
 

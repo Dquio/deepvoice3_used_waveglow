@@ -194,8 +194,13 @@ class AttentionLayer(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, embed_dim, attention_hidden, n_speakers, speaker_embed_dim,
-                 in_dim=80, r=5,
+    def __init__(self,
+                 embed_dim,
+                 attention_hidden,
+                 n_speakers,
+                 speaker_embed_dim,
+                 in_dim=80,
+                 r=5,
                  max_positions=512, padding_idx=None,
                  preattention=(80,128),
                  convolutions=((128, 5, 1),) * 4,
@@ -211,6 +216,7 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.dropout = dropout
         self.in_dim = in_dim
+        self.f0_dim = 1
         self.r = r
         self.query_position_rate = query_position_rate
         self.key_position_rate = torch.tensor(key_position_rate) if n_speakers > 1 else key_position_rate
@@ -218,7 +224,14 @@ class Decoder(nn.Module):
 
         in_channels = in_dim*r
 
-        # Prenet: FC layer
+        # Prenet: FC Layer (F0)
+        self.f0_prenet = Linear(r,in_dim*r)
+
+        # Upsampling & Downsampling (F0)
+        self.downsample = nn.Upsample(scale_factor=1/2.5)
+        self.upsample = nn.Upsample(scale_factor=2.5)
+
+        # Prenet: FC layer (mel)
         self.preattention = nn.ModuleList()
         self.speaker_fc = nn.ModuleList()
         for _, out_channels in preattention:
@@ -229,10 +242,9 @@ class Decoder(nn.Module):
             self.preattention.append(Linear(in_channels,out_channels))
             in_channels = out_channels
 
-        # Causal convolution blocks + attention layers
+        # Causal convolution blocks + attention layers (mel)
         self.convolutions = nn.ModuleList()
         self.attention = nn.ModuleList()
-
         for i, (out_channels, kernel_size, dilation) in enumerate(convolutions):
             assert in_channels == out_channels
             self.convolutions.append(
@@ -240,7 +252,7 @@ class Decoder(nn.Module):
                           in_channels, out_channels, kernel_size, causal=True,
                           dilation=dilation, dropout=dropout, residual=True))
             self.attention.append(
-                AttentionLayer(out_channels, embed_dim,attention_hidden,
+                AttentionLayer(out_channels, embed_dim, attention_hidden,
                                dropout=dropout,
                                window_ahead=window_ahead,
                                window_backward=window_backward,
@@ -249,56 +261,40 @@ class Decoder(nn.Module):
                                position_weight=position_weight))
             in_channels = out_channels
 
-        # When increasing only convolution
-        # for i, (out_channels, kernel_size, dilation) in enumerate(convolutions):
-        #     assert in_channels == out_channels
-        #     num_decoder_conv_layer = 3
-        #     for i in range(num_decoder_conv_layer)
-        #         self.convolutions.append(
-        #             Conv1dGLU(n_speakers, speaker_embed_dim,
-        #                       in_channels, out_channels, kernel_size, causal=True,
-        #                       dilation=dilation, dropout=dropout, residual=True))
-        #     self.attention.append(
-        #         AttentionLayer(out_channels, embed_dim,attention_hidden,
-        #                        dropout=dropout,
-        #                        window_ahead=window_ahead,
-        #                        window_backward=window_backward,
-        #                        n_speakers=n_speakers, speaker_embed_dim=speaker_embed_dim,
-        #                        key_position_rate=key_position_rate, query_position_rate=query_position_rate,
-        #                        position_weight=position_weight))
-        #     in_channels = out_channels
-
+        # Gate unit (mel)
         self.last_fc = Linear(in_channels,in_dim*r)
         self.gate_fc = Linear(in_channels,in_dim*r)
+
+        # Gate unit (F0)
+        self.f0_last_fc = Linear(in_channels,r)
+        self.f0_gate_fc = Linear(in_channels,r)
 
         # Mel-spectrogram (before sigmoid) -> Done binary flag
         self.fc = Linear(in_channels, 1)
 
         # PostNet: GLU Layer
-        self.glu = nn.ModuleList()
-        num_glu = 4
-        in_channels = in_dim
-        out_channels = in_dim
-        dilation = 1
-        for i in range(num_glu):
-            self.glu.append(
+        num_postnet = 5
+        postnet_in_channels = in_dim
+        postnet_out_channels = in_dim
+        postnet_kernel_size = kernel_size
+        postnet_dilation = 1
+        self.postnet = nn.ModuleList()
+        for i in range(num_postnet):
+            self.postnet.append(
                 Conv1dGLU(n_speakers, speaker_embed_dim,
-                          in_channels, out_channels, kernel_size, causal=False,
-                          dilation=dilation, dropout=dropout, residual=True))
-        self.post_convolution = Conv1dGLU(n_speakers, speaker_embed_dim,
-                                          in_channels, out_channels, kernel_size, causal=False,
-                                          dilation=dilation, dropout=dropout, residual=True)
+                          postnet_in_channels, postnet_out_channels, postnet_kernel_size, causal=False,
+                          dilation=postnet_dilation, dropout=dropout, residual=True))
 
         # World parameter
-        self.f0_convolution = Conv1dGLU(n_speakers, speaker_embed_dim,
-                                        in_channels, out_channels, kernel_size, causal=False,
-                                        dilation=dilation, dropout=dropout, residual=True)
-        self.f0_fc = Linear(in_channels, in_channels * self.r)
-        self.upsample = nn.Upsample(scale_factor=2.5)
-        self.world = Conv1dGLU(n_speakers, speaker_embed_dim,
-                          in_channels, out_channels, kernel_size, causal=False,
-                          dilation=dilation, dropout=dropout, residual=True)
-        self.f0 = Linear(in_channels, 1)
+        # self.f0_convolution = Conv1dGLU(n_speakers, speaker_embed_dim,
+        #                                 in_channels, out_channels, kernel_size, causal=False,
+        #                                 dilation=dilation, dropout=dropout, residual=True)
+        # self.f0_fc = Linear(in_channels, in_channels * self.r)
+        # self.upsample = nn.Upsample(scale_factor=2.5)
+        # self.world = Conv1dGLU(n_speakers, speaker_embed_dim,
+        #                   in_channels, out_channels, kernel_size, causal=False,
+        #                   dilation=dilation, dropout=dropout, residual=True)
+        # self.f0 = Linear(in_channels, 1)
 
         self.max_decoder_steps = 200
         self.min_decoder_steps = 10
@@ -310,6 +306,7 @@ class Decoder(nn.Module):
 
     def forward(self, encoder_out, # keys and values
                 inputs=None, # inputs mel spectrogram
+                f0_inputs=None,
                 text_positions=None, frame_positions=None,
                 speaker_embed=None, lengths=None):
         # inference
@@ -319,10 +316,25 @@ class Decoder(nn.Module):
             outputs = self.incremental_forward(encoder_out, text_positions, speaker_embed)
             return outputs
 
-        # Grouping multiple frames if necessary
+        # Fit the size to the mel spectrogram
+        f0_inputs = f0_inputs.unsqueeze(2)
+        f0_inputs = self.downsample(f0_inputs.transpose(1, 2))
+        f0_inputs = f0_inputs.transpose(1, 2)
+
+        # Grouping multiple frames if necessary (mel)
         if inputs.size(-1) == self.in_dim:
             inputs = inputs.view(inputs.size(0), inputs.size(1) // self.r, -1)
         assert inputs.size(-1) == self.in_dim * self.r
+
+        # Grouping multiple frames if necessary (F0)
+        if f0_inputs.size(-1) == self.f0_dim:
+            f0_inputs = f0_inputs.view(f0_inputs.size(0), f0_inputs.size(1) // self.r, -1)
+        assert f0_inputs.size(-1) == self.f0_dim * self.r
+
+        # f0_dim*r -> mel_dim*r
+        f0_inputs = self.f0_prenet(f0_inputs)
+
+        inputs += f0_inputs
 
         keys, values = encoder_out
 
@@ -347,7 +359,7 @@ class Decoder(nn.Module):
         # Generic case: B x T x C -> B x C x T
         x = x.transpose(1, 2)
 
-        # Casual convolutions + Multi-hop attentions
+        # Casual convolutions + Multi-hop attentions (mel)
         alignments = []
         for i, (f, attention) in enumerate(zip(self.convolutions, self.attention)):
 
@@ -372,51 +384,52 @@ class Decoder(nn.Module):
         # decoder state (B x T x C):
         # internal representation before compressed to output dimention
         decoder_states = x.transpose(1, 2).contiguous()
-        decoder_states_size = decoder_states.size()
 
         # Back to B x T x C
         x = x.transpose(1, 2)
-        out = self.last_fc(x)
-        gate = self.gate_fc(x)
 
         # project to mel-spectorgram
-        outputs = torch.sigmoid(gate) * out
         # Split by frame
+        out = self.last_fc(x)
+        gate = self.gate_fc(x)
+        outputs = torch.sigmoid(gate) * out
         outputs = outputs.view(outputs.size(0),-1,self.in_dim)
 
-        # B x T x C -> B x C x T
+        # project to F0
+        f0_out = self.f0_last_fc(x)
+        f0_gate = self.f0_gate_fc(x)
+        f0_outputs = torch.sigmoid(f0_gate) * f0_out
+        f0_outputs = f0_outputs.view(f0_outputs.size(0),-1,self.f0_dim)
+        f0_outputs = self.upsample(f0_outputs.transpose(1, 2))
+        f0_outputs = f0_outputs.transpose(1, 2)
+
+        # Postnet
         outputs_postnet = outputs
         outputs_postnet = outputs_postnet.transpose(1, 2)
-
-        # postnet
-        for i, f in enumerate(self.glu):
-            postnet_states = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
+        for i, f in enumerate(self.postnet):
+            outputs_postnet = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
 
         # f0:
-        f0 = self.f0_convolution(postnet_states) # 16,80,836
-        f0_size = f0.size()
-        f0 = f0.transpose(1, 2) # 16,836,80
+        # f0 = self.f0_convolution(postnet_states) # 16,80,836
+        # f0 = f0.transpose(1, 2) # 16,836,80
         # f0 = self.f0_fc(f0) # 16,836,320
         # f0 = f0.view(f0.size(0), -1, f0.size(-1)//self.r) # 16,3344,80
-        f0 = self.upsample(f0.transpose(1, 2)) # 16,80,8360
-        f0 = self.world(f0, speaker_embed) # 16,80,8360
-        f0 = f0.transpose(1, 2) # 16,8360,80
-        f0 = self.f0(f0) # 16,8360,1
+        # f0 = self.upsample(f0.transpose(1, 2)) # 16,80,8360
+        # f0 = self.world(f0, speaker_embed) # 16,80,8360
+        # f0 = f0.transpose(1, 2) # 16,8360,80
+        # f0 = self.f0(f0) # 16,8360,1
 
-        #postnet mel spectrogram:
-        outputs_postnet = self.post_convolution(postnet_states)
+        # np.savetxt("np_f0_decoder.txt", f0.to('cpu').detach().numpy().copy())
+        # f0 = f0.to(device)
 
         # Back to B x T x C
         outputs_postnet = outputs_postnet.transpose(1, 2)
-
-        # Skip Connection
-        # outputs_postnet += outputs
 
         # Done flag
         done = torch.sigmoid(self.fc(x))
 
 
-        return outputs, outputs_postnet, f0[:,:,0], torch.stack(alignments), done, decoder_states
+        return outputs, outputs_postnet, f0_outputs[:,:,0], torch.stack(alignments), done, decoder_states
 
     # inference
     def incremental_forward(self, encoder_out, text_positions, speaker_embed=None,
@@ -430,6 +443,7 @@ class Decoder(nn.Module):
 
         decoder_states = []
         outputs = []
+        f0_outputs = []
         alignments = []
         dones = []
         # intially set to zeros
@@ -456,6 +470,11 @@ class Decoder(nn.Module):
             else:
                 if t > 0:
                     current_input = outputs[-1]
+                    f0_current_input = f0_outputs[-1]
+                    f0_current_input = self.f0_prenet(f0_current_input)
+                    # f0_current_input = self.downsample(f0_current_input.transpose(1, 2))
+                    # f0_current_input = f0_current_input.transpose(1, 2)
+                    current_input += f0_current_input
             x = current_input
 
             # Prenet
@@ -465,7 +484,7 @@ class Decoder(nn.Module):
                     x = x + F.softsign(sf(speaker_embed))[:,None,:]
                 x = F.relu(f(x))
 
-            # Casual convolutions + Multi-hop attentions
+            # Casual convolutions + Multi-hop attentions (Mel)
             ave_alignment = None
             for idx, (f, attention) in enumerate(zip(self.convolutions,
                                                      self.attention)):
@@ -500,18 +519,25 @@ class Decoder(nn.Module):
                     x = (x + residual) * math.sqrt(0.5)
 
             decoder_state = x
+
+            # project to mel-spectrogram
             out = self.last_fc(x)
             gate = self.gate_fc(x)
-
-            #output & done flag predictions
             output = torch.sigmoid(gate) * out
+
+            # project to F0
+            f0_out = self.f0_last_fc(x)
+            f0_gate = self.f0_gate_fc(x)
+            f0_output = torch.sigmoid(f0_gate) * f0_out
+
+            # project Done Flag
             done = torch.sigmoid(self.fc(x))
 
             decoder_states += [decoder_state]
             outputs += [output]
+            f0_outputs += [f0_output]
             alignments += [ave_alignment]
             dones += [done]
-
 
             t += 1
             if test_inputs is None:
@@ -521,46 +547,45 @@ class Decoder(nn.Module):
                     break
 
         # Remove 1-element time axis
-        #for idx, alignment in enumerate(alignments):
+        #　for idx, alignment in enumerate(alignments):
         alignments = list(map(lambda x: x.squeeze(1), alignments))
         decoder_states = list(map(lambda x: x.squeeze(1), decoder_states))
         outputs = list(map(lambda x: x.squeeze(1), outputs))
+        f0_outputs = list(map(lambda x: x.squeeze(1), f0_outputs))
 
         # Combine outputs for all time steps
         alignments = torch.stack(alignments).transpose(0, 2)
         decoder_states = torch.stack(decoder_states).transpose(0, 1).contiguous()
         outputs = torch.stack(outputs).transpose(0, 1).contiguous()
         outputs = outputs.view(outputs.size(0),-1,self.in_dim)
+        f0_outputs = torch.stack(f0_outputs).transpose(0, 1).contiguous()
+        f0_outputs = f0_outputs.view(f0_outputs.size(0),-1,self.f0_dim)
+        f0_outputs = self.upsample(f0_outputs.transpose(1, 2))
+        f0_outputs = f0_outputs.transpose(1, 2)
 
         # B x T x C -> B x C x T
         outputs_postnet = outputs
         outputs_postnet = outputs_postnet.transpose(1, 2)
 
         # postnet
-        for i, f in enumerate(self.glu):
-            postnet_states = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
+        for i, f in enumerate(self.postnet):
+            outputs_postnet = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
 
         # f0:
-        f0 = self.f0_convolution(postnet_states)
-        f0 = f0.transpose(1, 2)
-        f0 = self.f0_fc(f0)
-        f0 = f0.view(f0.size(0), -1, f0.size(-1) // self.r)
-        f0 = self.upsample(f0.transpose(1, 2))
-        f0 = self.world(f0, speaker_embed)
-        f0 = f0.transpose(1, 2)
-        f0 = self.f0(f0)
-
-        # postnet mel spectrogram:
-        outputs_postnet = self.post_convolution(postnet_states)
+        # f0 = self.f0_convolution(postnet_states)
+        # f0 = f0.transpose(1, 2)
+        # f0 = self.f0_fc(f0)
+        # f0 = f0.view(f0.size(0), -1, f0.size(-1) // self.r)
+        # f0 = self.upsample(f0.transpose(1, 2))
+        # f0 = self.world(f0, speaker_embed)
+        # f0 = f0.transpose(1, 2)
+        # f0 = self.f0(f0)
 
         # Back to B x T x C
         outputs_postnet = outputs_postnet.transpose(1, 2)
 
-        # Skip Connection
-        # outputs_postnet += outputs
 
-
-        return outputs, outputs_postnet, f0[:,:,0], alignments, dones, decoder_states
+        return outputs, outputs_postnet, f0_outputs[:,:,0], alignments, dones, decoder_states
 
     def start_fresh_sequence(self):
         _clear_modules(self.preattention)
