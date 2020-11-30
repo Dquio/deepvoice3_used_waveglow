@@ -313,8 +313,8 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
 
             if global_epoch == 0 and global_step == 0:
                 tm.save_states(
-                    global_step, writer, mel_outputs, mel_outputs_postnet, converter_outputs, attn,
-                    mel, y, input_lengths, checkpoint_dir)
+                    global_step, writer, mel_outputs, mel_outputs_postnet, f0_outputs, converter_outputs, attn,
+                    mel, f0, y, input_lengths, checkpoint_dir)
                 tm.save_checkpoint(
                     model, optimizer, global_step, checkpoint_dir, global_epoch)
 
@@ -346,8 +346,8 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
 
             if global_step > 0 and global_step % checkpoint_interval == 0:
                 tm.save_states(
-                    global_step, writer, mel_outputs, mel_outputs_postnet, converter_outputs, attn,
-                    mel, y, input_lengths, checkpoint_dir, waveglow_path=waveglow_path, device=device)
+                    global_step, writer, mel_outputs, mel_outputs_postnet, f0_outputs, converter_outputs, attn,
+                    mel, f0, y, input_lengths, checkpoint_dir, waveglow_path=waveglow_path, device=device)
                 tm.save_checkpoint(
                     model, optimizer, global_step, checkpoint_dir, global_epoch)
 

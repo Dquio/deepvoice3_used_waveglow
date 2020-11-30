@@ -228,7 +228,7 @@ class Decoder(nn.Module):
         self.f0_prenet = Linear(r,in_dim*r)
 
         # Upsampling & Downsampling (F0)
-        self.downsample = nn.Upsample(scale_factor=1/2.5)
+        # self.downsample = nn.Upsample(scale_factor=1/2.5)
         self.upsample = nn.Upsample(scale_factor=2.5)
 
         # Prenet: FC layer (mel)
@@ -318,7 +318,8 @@ class Decoder(nn.Module):
 
         # Fit the size to the mel spectrogram
         f0_inputs = f0_inputs.unsqueeze(2)
-        f0_inputs = self.downsample(f0_inputs.transpose(1, 2))
+        # f0_inputs = self.downsample(f0_inputs.transpose(1, 2))
+        f0_inputs = F.interpolate(f0_inputs.transpose(1, 2), scale_factor=1/2.5)
         f0_inputs = f0_inputs.transpose(1, 2)
 
         # Grouping multiple frames if necessary (mel)

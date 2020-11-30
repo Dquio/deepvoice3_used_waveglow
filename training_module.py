@@ -324,12 +324,13 @@ def eval_model(global_step, writer, device, model, checkpoint_dir, ismultispeake
 
         for idx, text in enumerate(texts, 1):
             if waveglow_path is not None:
-                signal, signal_postnet, alignments, mel, mel_postnet = synthesis.tts_use_waveglow(
+                signal_postnet, alignments, mel, mel_postnet, f0 = synthesis.tts_use_waveglow(
                     model_eval, text, waveglow, p=1, speaker_id=speaker_id, fast=True, denoiser_strength=denoiser_strength)
             else:
                 signal, alignments, _, mel = synthesis.tts(
                     model_eval, text, p=1, speaker_id=speaker_id, fast=True)
-            signal /= np.max(np.abs(signal))
+            # signal /= np.max(np.abs(signal))
+            signal_postnet /= np.max(np.abs(signal_postnet))
 
             # Alignment
             for i, alignment in enumerate(alignments, 1):
@@ -344,21 +345,29 @@ def eval_model(global_step, writer, device, model, checkpoint_dir, ismultispeake
             # Mel
             writer.add_image("(Eval) Predicted mel spectrogram text{}_{}".format(idx, speaker_str),
                              prepare_spec_image(mel).transpose(2,0,1), global_step)
-            writer.add_image("(Eval) Predicted mel spectrogram postnet text{}_{}".format(idx, speaker_str),
+            writer.add_image("(Eval) Predicted mel spectrogram text{}_{} postnet".format(idx, speaker_str),
                              prepare_spec_image(mel_postnet).transpose(2, 0, 1), global_step)
 
+            # F0
+            fig = plt.figure()
+            f0 = f0 * 400
+            ax = fig.add_subplot(1, 1, 1)
+            ax.plot(f0)
+            writer.add_figure("(Eval) Predicted F0 text{}_{}".format(idx, speaker_str),
+                              fig, global_step)
+
             # Audio
-            path = join(eval_output_dir, "step{:09d}_text{}_{}_predicted.wav".format(
-                global_step, idx, speaker_str))
+            # path = join(eval_output_dir, "step{:09d}_text{}_{}_predicted.wav".format(
+            #     global_step, idx, speaker_str))
             path_postnet = join(eval_output_dir, "step{:09d}_text{}_{}_predicted_postnet.wav".format(
                 global_step, idx, speaker_str))
-            audio.save_wav(signal, path)
+            # audio.save_wav(signal, path)
             audio.save_wav(signal_postnet, path_postnet)
 
             try:
-                writer.add_audio("(Eval) Predicted audio signal {}_{}".format(idx, speaker_str),
-                                 signal, global_step, sample_rate=hparams.sample_rate)
-                writer.add_audio("(Eval) Predicted audio signal postnet {}_{}".format(idx, speaker_str),
+                # writer.add_audio("(Eval) Predicted audio signal {}_{}".format(idx, speaker_str),
+                #                  signal, global_step, sample_rate=hparams.sample_rate)
+                writer.add_audio("(Eval) Predicted audio signal {}_{} postnet".format(idx, speaker_str),
                                  signal_postnet, global_step, sample_rate=hparams.sample_rate)
             except Exception as e:
                 warn(str(e))
@@ -366,7 +375,7 @@ def eval_model(global_step, writer, device, model, checkpoint_dir, ismultispeake
 
 
 # postnet version
-def save_states(global_step, writer, mel_outputs, mel_outputs_postnet, converter_outputs, attn, mel, y,
+def save_states(global_step, writer, mel_outputs, mel_outputs_postnet, f0_outputs, converter_outputs, attn, mel, f0, y,
                 input_lengths, checkpoint_dir=None, waveglow_path=None, device='cpu', denoiser_strength=0.1):
 
     def save_world(tuple_outputs, save_str, global_step=global_step):
@@ -417,16 +426,33 @@ def save_states(global_step, writer, mel_outputs, mel_outputs_postnet, converter
         mel_output = prepare_spec_image(mel_output)#(audio._denormalize(mel_output))
         writer.add_image("Predicted mel spectrogram", mel_output.transpose(2,0,1), global_step)
 
-        #target
-        mel_target = mel[idx].cpu().data.numpy()
-        mel_target = prepare_spec_image(mel_target)#(audio._denormalize(mel_output))
-        writer.add_image("Target mel spectrogram", mel_target.transpose(2, 0, 1), global_step)
-
     # Predicted mel spectrogram (post)
     if mel_outputs_postnet is not None:
         mel_output_postnet = mel_outputs_postnet[idx].cpu().data.numpy()
         mel_output_postnet = prepare_spec_image(mel_output_postnet)#(audio._denormalize(mel_output))
         writer.add_image("Predicted mel spectrogram postnet", mel_output_postnet.transpose(2,0,1), global_step)
+
+    # Target mel spectrogram
+    if mel is not None:
+        mel_target = mel[idx].cpu().data.numpy()
+        mel_target = prepare_spec_image(mel_target)  # (audio._denormalize(mel_output))
+        writer.add_image("Target mel spectrogram", mel_target.transpose(2, 0, 1), global_step)
+
+    # Predicted F0
+    if f0_outputs is not None:
+        fig = plt.figure()
+        f0_output = f0_outputs[idx].cpu().data.numpy() * 400
+        ax = fig.add_subplot(1, 1, 1)
+        ax.plot(f0_output)
+        writer.add_figure("Predict f0", fig, global_step)
+
+    # Target F0
+    if f0 is not None:
+        fig = plt.figure()
+        f0_target = f0[idx].cpu().data.numpy() * 400
+        ax = fig.add_subplot(1, 1, 1)
+        ax.plot(f0_target)
+        writer.add_figure("Target f0", fig, global_step)
 
     if converter_outputs is not None:
         # Predicted world parameter
@@ -491,7 +517,7 @@ def save_states(global_step, writer, mel_outputs, mel_outputs_postnet, converter
 
         try:
             writer.add_audio("Predicted audio signal", waveform, global_step, sample_rate=hparams.sample_rate)
-            writer.add_audio("Predicted audio signal", waveform_postnet, global_step, sample_rate=hparams.sample_rate)
+            writer.add_audio("Predicted audio signal_postnet", waveform_postnet, global_step, sample_rate=hparams.sample_rate)
         except Exception as e:
             warn(str(e))
             pass

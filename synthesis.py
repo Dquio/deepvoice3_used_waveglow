@@ -106,18 +106,19 @@ def tts_use_waveglow(model, text, waveglow, p=0, speaker_id=None, fast=True, den
     with torch.no_grad():
         mel, mel_postnet, f0, alignments, done = model(
             sequence, text_positions=text_positions, speaker_ids=speaker_ids)
-        waveform = waveglow.infer(mel.transpose(1,2), sigma=0.6)
+        # waveform = waveglow.infer(mel.transpose(1,2), sigma=0.6)
         waveform_postnet = waveglow.infer(mel_postnet.transpose(1, 2), sigma=0.6)
     alignments = alignments[0].cpu().data.numpy()
     mel = mel[0].cpu().data.numpy()
     mel_postnet = mel_postnet[0].cpu().data.numpy()
+    f0 = f0[0].cpu().data.numpy()
     if denoiser_strength > 0:
-        waveform = denoiser(waveform, denoiser_strength).squeeze(0)
+        # waveform = denoiser(waveform, denoiser_strength).squeeze(0)
         waveform_postnet = denoiser(waveform_postnet, denoiser_strength).squeeze(0)
-    waveform = waveform[0].cpu().data.numpy()
+    # waveform = waveform[0].cpu().data.numpy()
     waveform_postnet = waveform_postnet[0].cpu().data.numpy()
 
-    return waveform, waveform_postnet, alignments, mel, mel_postnet
+    return waveform_postnet, alignments, mel, mel_postnet, f0
 
 
 def _load(checkpoint_path):
@@ -181,23 +182,26 @@ if __name__ == "__main__":
             words = nltk.word_tokenize(text)
             start = time.time()
             if waveglow_path is not None:
-                waveform, alignments, mel = tts_use_waveglow(
+                waveform_postnet, alignments, mel, mel_postnet, f0 = tts_use_waveglow(
                     model, text, waveglow, p=replace_pronunciation_prob, speaker_id=speaker_id, fast=True, denoiser_strength=denoiser_strength)
             else:
                 waveform, alignments, _, mel = tts(
                     model, text, p=replace_pronunciation_prob, speaker_id=speaker_id, fast=True)
             end = time.time() - start
+
             dst_wav_path = join(dst_dir, "{}_{}{}.wav".format(
                 idx, checkpoint_name, file_name_suffix))
             dst_world_path = join(dst_dir, "{}_{}{}_world.wav".format(
                 idx, checkpoint_name, file_name_suffix))
+            audio.save_wav(waveform, dst_wav_path)
             for i, alignment in enumerate(alignments, 1):
                 dst_alignment_path = join(
                     dst_dir, "{}_{}{}_alignment_layer_{}.png".format(idx, checkpoint_name,
                                                         file_name_suffix,i))
                 plot_alignment(alignment.T, dst_alignment_path,
                                info="{}, {}, layer_{}".format(hparams.builder, basename(checkpoint_path),i))
-            audio.save_wav(waveform, dst_wav_path)
+            # dst_mel_path = join(dst_dir, "{}_{}{}_mel_spectrogram.png")
+
             name = splitext(basename(text_list_file_path))[0]
             if output_html:
                 print("""
