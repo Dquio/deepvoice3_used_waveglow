@@ -1,13 +1,12 @@
 # Deepvoice3の再現実装
 
-postnetを追加する上で行った変更点は
-- `deepvoice3.py`の`Decoder`の`forward`内にGLU層が5層のpostnetを追加(`incremental_forward`にも同様に追加)
-- `__init__.py`の`AttentionSeq2Seq`と`MultiSpeakerSeq2seq`内でpostnetの出力を受け取ることができるように変更
-- `train_module.py`の`eval_model`と`save_states`でpostnetの出力を使用するように変更
-- `train_seq2seq.py`の`train`でpostnetの出力の誤差を考慮して学習が進むように変更
-- `synthesis.py`の`tts_use_waveglow`でpostnet後の音声を生成するように変更
+自己回帰部分のF0実装の手順は
+1. F0のダウンサンプリング
+2. F0とMelのサイズを揃えて足し合わせる
+3. 処理を行いF0,Mel,Doneそれぞれの次元に投影する
+4. F0をアップサンプリングする
 
-1. [arXiv:1710.07654](https://arxiv.org/abs/1710.07654): Deep Voice 3: Scaling Text-to-Speech with Convolutional Sequence Learning.
+[arXiv:1710.07654](https://arxiv.org/abs/1710.07654): Deep Voice 3: Scaling Text-to-Speech with Convolutional Sequence Learning.
 
 # use_waveglow Repository
 
