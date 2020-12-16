@@ -78,7 +78,7 @@ def _process_utterance(out_dir, index, wav_path, text):
     # compute a mel-scaled spectrogram
     # Todo: powerでは何を指定できるのかを調査
     # Todo: パワースペクトルとエネルギースペクトルの違いを調査
-    mel_spectrogram = librosa.feature.melspectrogram(wav, n_fft=1024,hop_length=256,n_mels=80,fmin=0.0,fmax=8000,power=1.0)
+    mel_spectrogram = librosa.feature.melspectrogram(wav,sr=16000,n_fft=1024,hop_length=80,win_length=400,n_mels=80,fmin=0.0,fmax=8000,power=1.0)
     # take logarithm and clipping process
     # Todo: 絶対値に変換する意味を調査
     mel_spectrogram = np.log(np.abs(mel_spectrogram).clip(1e-5,10)).astype(np.float32)

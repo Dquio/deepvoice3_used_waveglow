@@ -227,8 +227,7 @@ class Decoder(nn.Module):
         # Prenet: FC Layer (F0)
         self.f0_prenet = Linear(r,in_dim*r)
 
-        # Upsampling & Downsampling (F0)
-        # self.downsample = nn.Upsample(scale_factor=1/2.5)
+        # Upsampling (F0)
         self.upsample = nn.Upsample(scale_factor=2.5)
 
         # Prenet: FC layer (mel)
@@ -287,14 +286,14 @@ class Decoder(nn.Module):
 
         # World parameter
         # self.f0_convolution = Conv1dGLU(n_speakers, speaker_embed_dim,
-        #                                 in_channels, out_channels, kernel_size, causal=False,
+        #                                 in_dim, in_dim, kernel_size, causal=False,
         #                                 dilation=dilation, dropout=dropout, residual=True)
-        # self.f0_fc = Linear(in_channels, in_channels * self.r)
+        # self.f0_fc = Linear(in_dim, in_dim * self.r)
         # self.upsample = nn.Upsample(scale_factor=2.5)
         # self.world = Conv1dGLU(n_speakers, speaker_embed_dim,
-        #                   in_channels, out_channels, kernel_size, causal=False,
+        #                   in_dim, in_dim, kernel_size, causal=False,
         #                   dilation=dilation, dropout=dropout, residual=True)
-        # self.f0 = Linear(in_channels, 1)
+        # self.f0 = Linear(in_dim, 1)
 
         self.max_decoder_steps = 200
         self.min_decoder_steps = 10
@@ -303,6 +302,8 @@ class Decoder(nn.Module):
             self.force_monotonic_attention = [force_monotonic_attention] * len(convolutions)
         else:
             self.force_monotonic_attention = force_monotonic_attention
+
+        self.match_frame_size = True
 
     def forward(self, encoder_out, # keys and values
                 inputs=None, # inputs mel spectrogram
@@ -318,9 +319,10 @@ class Decoder(nn.Module):
 
         # Fit the size to the mel spectrogram
         f0_inputs = f0_inputs.unsqueeze(2)
-        # f0_inputs = self.downsample(f0_inputs.transpose(1, 2))
-        f0_inputs = F.interpolate(f0_inputs.transpose(1, 2), scale_factor=1/2.5)
-        f0_inputs = f0_inputs.transpose(1, 2)
+
+        if not self.match_frame_size:
+            f0_inputs = F.interpolate(f0_inputs.transpose(1, 2), scale_factor=1/2.5)
+            f0_inputs = f0_inputs.transpose(1, 2)
 
         # Grouping multiple frames if necessary (mel)
         if inputs.size(-1) == self.in_dim:
@@ -335,7 +337,7 @@ class Decoder(nn.Module):
         # f0_dim*r -> mel_dim*r
         f0_inputs = self.f0_prenet(f0_inputs)
 
-        inputs += f0_inputs
+        inputs = inputs + f0_inputs
 
         keys, values = encoder_out
 
@@ -396,13 +398,32 @@ class Decoder(nn.Module):
         outputs = torch.sigmoid(gate) * out
         outputs = outputs.view(outputs.size(0),-1,self.in_dim)
 
+
+        # project to F0
+        # f0_outputs = self.f0_fc(x)
+        # f0_outputs = f0_outputs.view(f0_outputs.size(0), -1, f0_outputs.size(-1) // self.r)
+        # f0_outputs = self.upsample(f0_outputs.transpose(1, 2))
+        # f0_outputs = self.world(f0_outputs, speaker_embed)
+        # f0_outputs = f0_outputs.transpose(1, 2)
+        # f0_outputs = self.f0(f0_outputs)
+
         # project to F0
         f0_out = self.f0_last_fc(x)
         f0_gate = self.f0_gate_fc(x)
         f0_outputs = torch.sigmoid(f0_gate) * f0_out
-        f0_outputs = f0_outputs.view(f0_outputs.size(0),-1,self.f0_dim)
-        f0_outputs = self.upsample(f0_outputs.transpose(1, 2))
-        f0_outputs = f0_outputs.transpose(1, 2)
+        f0_outputs = f0_outputs.view(f0_outputs.size(0), -1, self.f0_dim)
+        if not self.match_frame_size:
+            f0_outputs = self.upsample(f0_outputs.transpose(1, 2))
+            f0_outputs = f0_outputs.transpose(1, 2)
+
+        # f0_outputs = self.upsample(f0_outputs.transpose(1, 2))
+        # f0_outputs = f0_outputs.transpose(1, 2)
+        # f0_outputs = f0_outputs.reshape(f0_outputs.size(0), -1, self.f0_dim)
+
+        # f0_outputs = f0_outputs.view(f0_outputs.size(0),-1,self.f0_dim)
+        # f0_outputs = self.upsample(f0_outputs.transpose(1, 2))
+        # f0_outputs = self.world(f0_outputs, speaker_embed)
+        # f0_outputs = f0_outputs.transpose(1, 2)
 
         # Postnet
         outputs_postnet = outputs
@@ -411,7 +432,7 @@ class Decoder(nn.Module):
             outputs_postnet = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
 
         # f0:
-        # f0 = self.f0_convolution(postnet_states) # 16,80,836
+        # f0 = self.f0_convolution(outputs_postnet) # 16,80,836
         # f0 = f0.transpose(1, 2) # 16,836,80
         # f0 = self.f0_fc(f0) # 16,836,320
         # f0 = f0.view(f0.size(0), -1, f0.size(-1)//self.r) # 16,3344,80
@@ -419,11 +440,13 @@ class Decoder(nn.Module):
         # f0 = self.world(f0, speaker_embed) # 16,80,8360
         # f0 = f0.transpose(1, 2) # 16,8360,80
         # f0 = self.f0(f0) # 16,8360,1
+        # f0_outputs = f0
 
         # np.savetxt("np_f0_decoder.txt", f0.to('cpu').detach().numpy().copy())
         # f0 = f0.to(device)
 
         # Back to B x T x C
+        # outputs_postnet = self.last_postnet(outputs_postnet)
         outputs_postnet = outputs_postnet.transpose(1, 2)
 
         # Done flag
@@ -431,6 +454,7 @@ class Decoder(nn.Module):
 
 
         return outputs, outputs_postnet, f0_outputs[:,:,0], torch.stack(alignments), done, decoder_states
+        # return outputs, outputs_postnet, torch.stack(alignments), done, decoder_states
 
     # inference
     def incremental_forward(self, encoder_out, text_positions, speaker_embed=None,
@@ -458,7 +482,13 @@ class Decoder(nn.Module):
         # Setting initial input
         if initial_input is None:
             initial_input = keys.data.new(B, 1, self.in_dim *self.r).zero_()
+            # f0_initial_input = keys.data.new(B, 1, self.f0_dim * self.r).zero_()
         current_input = initial_input
+        # f0_current_input = f0_initial_input
+        # f0_current_input = self.f0_prenet(f0_current_input)
+        # f0_current_input = F.interpolate(f0_current_input.transpose(1, 2), scale_factor=1 / 2.5)
+        # f0_current_input = f0_current_input.transpose(1, 2)
+        # current_input += f0_current_input
         while True:
             # frame pos start with 1.
             frame_pos = keys.data.new(B, 1).fill_(t + 1).long()
@@ -473,9 +503,9 @@ class Decoder(nn.Module):
                     current_input = outputs[-1]
                     f0_current_input = f0_outputs[-1]
                     f0_current_input = self.f0_prenet(f0_current_input)
-                    # f0_current_input = self.downsample(f0_current_input.transpose(1, 2))
+                    # f0_current_input = F.interpolate(f0_current_input.transpose(1, 2), scale_factor=1 / 2.5)
                     # f0_current_input = f0_current_input.transpose(1, 2)
-                    current_input += f0_current_input
+                    current_input = current_input + f0_current_input
             x = current_input
 
             # Prenet
@@ -527,9 +557,15 @@ class Decoder(nn.Module):
             output = torch.sigmoid(gate) * out
 
             # project to F0
+            # f0_output = self.f0_fc(x)
+
+            # project to F0
             f0_out = self.f0_last_fc(x)
             f0_gate = self.f0_gate_fc(x)
             f0_output = torch.sigmoid(f0_gate) * f0_out
+
+            # f0_outputs = self.upsample(f0_outputs.transpose(1, 2))
+            # f0_outputs = f0_outputs.transpose(1, 2)
 
             # project Done Flag
             done = torch.sigmoid(self.fc(x))
@@ -561,8 +597,18 @@ class Decoder(nn.Module):
         outputs = outputs.view(outputs.size(0),-1,self.in_dim)
         f0_outputs = torch.stack(f0_outputs).transpose(0, 1).contiguous()
         f0_outputs = f0_outputs.view(f0_outputs.size(0),-1,self.f0_dim)
-        f0_outputs = self.upsample(f0_outputs.transpose(1, 2))
-        f0_outputs = f0_outputs.transpose(1, 2)
+        if not self.match_frame_size:
+            f0_outputs = self.upsample(f0_outputs.transpose(1, 2))
+            f0_outputs = f0_outputs.transpose(1, 2)
+
+        # f0_outputs = self.world(f0_outputs, speaker_embed)
+        # f0_outputs = f0_outputs.transpose(1, 2)
+
+        # f0_outputs = f0_outputs.view(f0_outputs.size(0), -1, f0_outputs.size(-1) // self.r)
+        # f0_outputs = self.upsample(f0_outputs.transpose(1, 2))
+        # f0_outputs = self.world(f0_outputs, speaker_embed)
+        # f0_outputs = f0_outputs.transpose(1, 2)
+        # f0_outputs = self.f0(f0_outputs)
 
         # B x T x C -> B x C x T
         outputs_postnet = outputs
@@ -573,7 +619,7 @@ class Decoder(nn.Module):
             outputs_postnet = f(outputs_postnet, speaker_embed) if isinstance(f, Conv1dGLU) else f(outputs_postnet)
 
         # f0:
-        # f0 = self.f0_convolution(postnet_states)
+        # f0 = self.f0_convolution(outputs_postnet)
         # f0 = f0.transpose(1, 2)
         # f0 = self.f0_fc(f0)
         # f0 = f0.view(f0.size(0), -1, f0.size(-1) // self.r)
@@ -581,12 +627,15 @@ class Decoder(nn.Module):
         # f0 = self.world(f0, speaker_embed)
         # f0 = f0.transpose(1, 2)
         # f0 = self.f0(f0)
+        # f0_outputs = f0
 
         # Back to B x T x C
+        # outputs_postnet = self.last_postnet(outputs_postnet)
         outputs_postnet = outputs_postnet.transpose(1, 2)
 
 
         return outputs, outputs_postnet, f0_outputs[:,:,0], alignments, dones, decoder_states
+        # return outputs, outputs_postnet, alignments, dones, decoder_states
 
     def start_fresh_sequence(self):
         _clear_modules(self.preattention)

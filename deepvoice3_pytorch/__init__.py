@@ -161,6 +161,7 @@ class MultispeakerSeq2seq(nn.Module):
         mel_outputs, mel_outputs_postnet, f0_outputs, alignments, done, decoder_states = self.seq2seq(
             text_sequences, mel_targets, f0_targets, speaker_embed,
             text_positions, frame_positions, input_lengths)
+
         return mel_outputs, mel_outputs_postnet, f0_outputs, alignments, done
 
 

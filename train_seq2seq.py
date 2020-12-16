@@ -90,18 +90,23 @@ def collate_fn(batch):
     multi_speaker = len(batch[0]) == 4
 
     # Lengths
+    # Find the maximum length (text)
     input_lengths = [len(x[0]) for x in batch]
     max_input_len = max(input_lengths)
 
+    # Find the maximum length (mel)
     target_lengths = [len(x[1]) for x in batch]
     max_target_len = max(target_lengths)
 
+    # Find the length (F0)
     world_lengths = [len(x[2]) for x in batch]
 
+    # Convert to a multiple of r (text)
     if max_input_len % r != 0:
         max_input_len += r - max_input_len % r
         assert max_input_len % r == 0
 
+    # Convert to a multiple of r (mel)
     if max_target_len % r != 0:
         max_target_len += r - max_target_len % r
         assert max_target_len % r == 0
@@ -109,10 +114,10 @@ def collate_fn(batch):
     # Set 0 for zero beginning padding
     # imitates initial decoder states
     b_pad = r
-    max_target_len += b_pad
-    # Todo: なぜアップサンプリングしているのかを調査
+    max_target_len += b_pad # TODO: b_padを足し合わせる意義
     max_world_len = int(max_target_len * hparams.world_upsample)
 
+    # padding (text)
     a = np.array([tm._pad(x[0], max_input_len) for x in batch], dtype=np.int)
     x_batch = torch.LongTensor(a)
 
@@ -120,12 +125,100 @@ def collate_fn(batch):
     target_lengths = torch.LongTensor(target_lengths)
     world_lengths = torch.LongTensor(world_lengths)
 
+    # padding (mel)
     b = np.array([tm._pad_2d(x[1], max_target_len, b_pad=b_pad) for x in batch],
                  dtype=np.float32)
     mel_batch = torch.FloatTensor(b)
 
+    # padding (F0)
     rw = int(r * hparams.world_upsample)
     d = np.array([np.pad(x[2], (rw, max_world_len - len(x[2]) - rw), mode="constant") for x in batch], dtype=np.float32)
+    f0_batch = torch.FloatTensor(d)
+
+    # text positions
+    text_positions = np.array([tm._pad(np.arange(1, len(x[0]) + 1), max_input_len)
+                               for x in batch], dtype=np.int)
+    text_positions = torch.LongTensor(text_positions)
+
+    max_decoder_target_len = max_target_len // r
+
+    # frame positions
+    s, e = 1, max_decoder_target_len + 1
+    # if b_pad > 0:
+    #    s, e = s - 1, e - 1
+    frame_positions = torch.arange(s, e).long().unsqueeze(0).expand(
+        len(batch), max_decoder_target_len).clone()
+
+    # done flags
+    done = np.array([tm._pad(np.zeros(len(x[1]) // r - 1),
+                          max_decoder_target_len, constant_values=1)
+                     for x in batch])
+    done = torch.FloatTensor(done).unsqueeze(-1)
+
+    if multi_speaker:
+        speaker_ids = torch.LongTensor([x[3] for x in batch])
+    else:
+        speaker_ids = None
+
+    return x_batch, input_lengths, mel_batch, f0_batch, \
+        (text_positions, frame_positions), done, target_lengths, speaker_ids
+
+def collate_fn_norm_lj(batch):
+    """Create batch"""
+    r = hparams.outputs_per_step
+    multi_speaker = len(batch[0]) == 4
+
+    # Lengths
+    # Find the maximum length (text)
+    input_lengths = [len(x[0]) for x in batch]
+    max_input_len = max(input_lengths)
+
+    # Find the maximum length (mel)
+    target_lengths = [len(x[1]) for x in batch]
+    max_target_len = max(target_lengths)
+
+    # Find the maximum length (F0)
+    world_lengths = [len(x[2]) for x in batch]
+    max_world_len = max(world_lengths)
+
+    # Convert to a multiple of r (text)
+    if max_input_len % r != 0:
+        max_input_len += r - max_input_len % r
+        assert max_input_len % r == 0
+
+    # Convert to a multiple of r (mel)
+    if max_target_len % r != 0:
+        max_target_len += r - max_target_len % r
+        assert max_target_len % r == 0
+
+    if max_world_len % r != 0:
+        max_world_len += r - max_world_len % r
+        assert max_world_len % r == 0
+
+    # Set 0 for zero beginning padding
+    # imitates initial decoder states
+    b_pad = r
+    c_pad = r
+    max_target_len += b_pad # TODO: b_padを足し合わせる意義
+    max_world_len += c_pad
+    # max_world_len = int(max_target_len * hparams.world_upsample)
+
+    # padding (text)
+    a = np.array([tm._pad(x[0], max_input_len) for x in batch], dtype=np.int)
+    x_batch = torch.LongTensor(a)
+
+    input_lengths = torch.LongTensor(input_lengths)
+    target_lengths = torch.LongTensor(target_lengths)
+    world_lengths = torch.LongTensor(world_lengths)
+
+    # padding (mel)
+    b = np.array([tm._pad_2d(x[1], max_target_len, b_pad=b_pad) for x in batch],
+                 dtype=np.float32)
+    mel_batch = torch.FloatTensor(b)
+
+    # padding (F0)
+    # rw = int(r * hparams.world_upsample)
+    d = np.array([np.pad(x[2], (c_pad, max_world_len - len(x[2]) - c_pad), mode="constant") for x in batch], dtype=np.float32)
     f0_batch = torch.FloatTensor(d)
 
     # text positions
@@ -227,6 +320,8 @@ def train(device, model, data_loader, optimizer, writer,
     r = hparams.outputs_per_step
     current_lr = init_lr
 
+    match_frame_size = True
+
     # loss function
     binary_criterion = nn.BCELoss()
     l1 = nn.L1Loss()
@@ -302,12 +397,12 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             # done:
             done_loss = binary_criterion(done_hat, done)
             # f0:
-            rw = int(r * hparams.world_upsample)
-            f0_loss = l1(f0_outputs[:, :-rw], f0[:, rw:])
-            # np.savetxt("np_f0_origin.txt", f0.to('cpu').detach().numpy().copy())
-            # np.savetxt("np_f0_output.txt", f0_outputs.to('cpu').detach().numpy().copy())
-            # f0 = f0.to(device)
-            # f0_outputs = f0_outputs.to(device)
+            if not match_frame_size:
+                rw = int(r * hparams.world_upsample)
+                f0_loss = l1(f0_outputs[:, :-rw], f0[:, rw:])
+            else:
+                f0_loss = l1(f0_outputs[:, :-r], f0[:, r:])
+
             # combine Losses
             loss = mel_loss + mel_postnet_loss + done_loss + f0_loss
 
@@ -427,7 +522,7 @@ if __name__ == "__main__":
     data_loader = data_utils.DataLoader(
         dataset, batch_size=hparams.batch_size,
         num_workers=hparams.num_workers, sampler=sampler,
-        collate_fn=collate_fn, pin_memory=hparams.pin_memory)
+        collate_fn=collate_fn_norm_lj, pin_memory=hparams.pin_memory)
 
     device = torch.device("cuda" if use_cuda else "cpu")
 

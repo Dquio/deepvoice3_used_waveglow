@@ -36,9 +36,9 @@ hparams = hparam_tf.hparam.HParams(
     fmin=0,
     fmax=8000,
     fft_size=1024,
-    fft_wsize=1024,
-    hop_size=1024//4, #fft_wsize/4
-    sample_rate=22050,
+    fft_wsize=400,
+    hop_size=80, #fft_wsize/4
+    sample_rate=16000,
     preemphasis=0.97,
     min_level_db=-100,
     spec_ref_level_db=20, #max_db : 40
@@ -114,7 +114,7 @@ hparams = hparam_tf.hparam.HParams(
     # Eval:
     # this can be list for multple layers of attention
     # e.g., [True, False, False, False, True]
-    force_monotonic_attention=[False,True,False,False],
+    force_monotonic_attention=[False,False,False,False],
     # Attention constraint for incremental decoding
     window_ahead=3,
     # 0 tends to prevent word repretetion, but sometime causes skip words
