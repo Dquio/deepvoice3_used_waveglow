@@ -36,7 +36,8 @@ def deepvoice3(n_vocab,
                window_backward=1,
                world_upsample = 1,
                sp_fft_size=1025,
-               training_type='seq2seq'
+               training_type='seq2seq',
+               match_frame_size=True
                ):
     """Build deepvoice3
     """
@@ -71,6 +72,7 @@ def deepvoice3(n_vocab,
         use_memory_mask=use_memory_mask,
         window_ahead=window_ahead,
         window_backward=window_backward,
+        match_frame_size=match_frame_size
     )
 
     seq2seq = AttentionSeq2Seq(encoder, decoder)

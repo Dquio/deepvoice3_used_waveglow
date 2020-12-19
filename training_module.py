@@ -626,7 +626,8 @@ def build_model(training_type='seq2seq'):
         window_backward=hparams.window_backward,
         world_upsample=hparams.world_upsample,
         sp_fft_size=hparams.sp_fft_size,
-        training_type=training_type
+        training_type=training_type,
+        match_frame_size=hparams.match_frame_size
     )
     return model
 

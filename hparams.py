@@ -36,9 +36,9 @@ hparams = hparam_tf.hparam.HParams(
     fmin=0,
     fmax=8000,
     fft_size=1024,
-    fft_wsize=400,
-    hop_size=80, #fft_wsize/4
-    sample_rate=16000,
+    fft_wsize=400, # 400 (ver norm_lj)
+    hop_size=80, #fft_wsize/4 # 80 (ver norm_lj)
+    sample_rate=160000,
     preemphasis=0.97,
     min_level_db=-100,
     spec_ref_level_db=20, #max_db : 40
@@ -135,6 +135,8 @@ hparams = hparam_tf.hparam.HParams(
     min_text=20,
     # if true, data without phoneme alignment file(.lab) will be ignored
     process_only_htk_aligned=False,
+
+    match_frame_size = True,
 )
 
 

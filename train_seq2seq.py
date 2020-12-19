@@ -191,6 +191,7 @@ def collate_fn_norm_lj(batch):
         max_target_len += r - max_target_len % r
         assert max_target_len % r == 0
 
+    # Convert to a multiple of r (F0)
     if max_world_len % r != 0:
         max_world_len += r - max_world_len % r
         assert max_world_len % r == 0
@@ -201,7 +202,6 @@ def collate_fn_norm_lj(batch):
     c_pad = r
     max_target_len += b_pad # TODO: b_padを足し合わせる意義
     max_world_len += c_pad
-    # max_world_len = int(max_target_len * hparams.world_upsample)
 
     # padding (text)
     a = np.array([tm._pad(x[0], max_input_len) for x in batch], dtype=np.int)
@@ -320,8 +320,6 @@ def train(device, model, data_loader, optimizer, writer,
     r = hparams.outputs_per_step
     current_lr = init_lr
 
-    match_frame_size = True
-
     # loss function
     binary_criterion = nn.BCELoss()
     l1 = nn.L1Loss()
@@ -376,11 +374,6 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             target_lengths = target_lengths.to(device)
             speaker_ids = speaker_ids.to(device) if ismultispeaker else None
 
-            # f0_size = f0.size()
-            # np.savetxt("np_f0_input.txt", f0.to('cpu').detach().numpy().copy())
-            # f0 = f0.to(device)
-            # mel_size = mel.size()
-
             # model output (postnet version)
             mel_outputs, mel_outputs_postnet, f0_outputs, attn, done_hat = model(
                 x, mel, f0, speaker_ids=speaker_ids,
@@ -397,11 +390,11 @@ Please set a larger value for ``max_position`` in hyper parameters.""".format(
             # done:
             done_loss = binary_criterion(done_hat, done)
             # f0:
-            if not match_frame_size:
+            if hparams.match_frame_size:
+                f0_loss = l1(f0_outputs[:, :-r], f0[:, r:])
+            else:
                 rw = int(r * hparams.world_upsample)
                 f0_loss = l1(f0_outputs[:, :-rw], f0[:, rw:])
-            else:
-                f0_loss = l1(f0_outputs[:, :-r], f0[:, r:])
 
             # combine Losses
             loss = mel_loss + mel_postnet_loss + done_loss + f0_loss
@@ -519,10 +512,16 @@ if __name__ == "__main__":
 
     # Dataset and Dataloader setup
     dataset = PyTorchDataset(X, Mel, F0)
-    data_loader = data_utils.DataLoader(
-        dataset, batch_size=hparams.batch_size,
-        num_workers=hparams.num_workers, sampler=sampler,
-        collate_fn=collate_fn_norm_lj, pin_memory=hparams.pin_memory)
+    if hparams.match_frame_size:
+        data_loader = data_utils.DataLoader(
+            dataset, batch_size=hparams.batch_size,
+            num_workers=hparams.num_workers, sampler=sampler,
+            collate_fn=collate_fn_norm_lj, pin_memory=hparams.pin_memory)
+    else:
+        data_loader = data_utils.DataLoader(
+            dataset, batch_size=hparams.batch_size,
+            num_workers=hparams.num_workers, sampler=sampler,
+            collate_fn=collate_fn, pin_memory=hparams.pin_memory)
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
