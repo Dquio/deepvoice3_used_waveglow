@@ -35,7 +35,8 @@ if __name__ == "__main__":
     # Code below
     X = FileSourceDataset(TextDataSource(data_root))
     Mel = FileSourceDataset(MelSpecDataSource(data_root))
-    F0 = FileSourceDataset(F0DataSource('./data_ljspeech_4096/'))
+    # F0 = FileSourceDataset(F0DataSource('./data_ljspeech_4096/'))
+    F0 = FileSourceDataset(F0DataSource(data_root))
 
     in_sizes = []
     out_sizes = []
@@ -54,7 +55,8 @@ if __name__ == "__main__":
 
     input_timestamps = np.sum(in_sizes)
     output_timestamps = np.sum(out_sizes) / hparams.outputs_per_step
+    world_timestamps = np.sum(world_sizes) / hparams.outputs_per_step
     spec_world_ratio = np.max(world_sizes / out_sizes)
 
-    print(input_timestamps, output_timestamps, output_timestamps / input_timestamps, spec_world_ratio)
+    print(input_timestamps, output_timestamps, world_timestamps, output_timestamps / input_timestamps, spec_world_ratio)
     sys.exit(0)

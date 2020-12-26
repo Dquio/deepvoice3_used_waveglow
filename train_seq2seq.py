@@ -222,6 +222,7 @@ def collate_fn_norm_lj(batch):
     f0_batch = torch.FloatTensor(d)
 
     # text positions
+    # TODO: 値を確認
     text_positions = np.array([tm._pad(np.arange(1, len(x[0]) + 1), max_input_len)
                                for x in batch], dtype=np.int)
     text_positions = torch.LongTensor(text_positions)
@@ -229,6 +230,7 @@ def collate_fn_norm_lj(batch):
     max_decoder_target_len = max_target_len // r
 
     # frame positions
+    # TODO: 値を確認
     s, e = 1, max_decoder_target_len + 1
     # if b_pad > 0:
     #    s, e = s - 1, e - 1

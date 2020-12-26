@@ -26,6 +26,7 @@ def position_encoding_init(n_position, d_pos_vec, position_rate=1.0,
 
 def sinusoidal_encode(x, w):
     y = w * x
+    # TODO: 値を調査
     y[1:, 0::2] = torch.sin(y[1:, 0::2].clone())
     y[1:, 1::2] = torch.cos(y[1:, 1::2].clone())
     return y

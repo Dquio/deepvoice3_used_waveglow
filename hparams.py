@@ -38,7 +38,7 @@ hparams = hparam_tf.hparam.HParams(
     fft_size=1024,
     fft_wsize=400, # 400 (ver norm_lj)
     hop_size=80, #fft_wsize/4 # 80 (ver norm_lj)
-    sample_rate=160000,
+    sample_rate=16000,
     preemphasis=0.97,
     min_level_db=-100,
     spec_ref_level_db=20, #max_db : 40
@@ -74,12 +74,12 @@ hparams = hparam_tf.hparam.HParams(
     num_encoder_layer=9, # default:7
     decoder_channels=512, # default:256
     num_decoder_layer=4,
-    attention_hidden=256, # default:128
+    attention_hidden=128, # default:128
     converter_channels=256,
     num_converter_layer=5,
     query_position_rate=1.0,
     # can be computed by `compute_timestamp_ratio.py`.
-    key_position_rate=1.48,  # 2.37 for jsut
+    key_position_rate=3.45,  # 2.37 for jsut # 3.446996520908985 # queryのtimestepに合わせるためのパラメータ
     position_weight=1.0,
     use_memory_mask=False,
     trainable_positional_encodings=True,
@@ -114,7 +114,7 @@ hparams = hparam_tf.hparam.HParams(
     # Eval:
     # this can be list for multple layers of attention
     # e.g., [True, False, False, False, True]
-    force_monotonic_attention=[False,False,False,False],
+    force_monotonic_attention=[True,False,False,False],
     # Attention constraint for incremental decoding
     window_ahead=3,
     # 0 tends to prevent word repretetion, but sometime causes skip words
@@ -136,7 +136,7 @@ hparams = hparam_tf.hparam.HParams(
     # if true, data without phoneme alignment file(.lab) will be ignored
     process_only_htk_aligned=False,
 
-    match_frame_size = True,
+    match_frame_size=True,
 )
 
 

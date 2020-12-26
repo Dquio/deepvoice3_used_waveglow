@@ -95,9 +95,19 @@ class Encoder(nn.Module):
 
 
 class AttentionLayer(nn.Module):
-    def __init__(self, conv_channels, embed_dim, att_hid, n_speakers, speaker_embed_dim,
-                 key_position_rate, query_position_rate, position_weight, max_positions=512,
-                 dropout=0.1, window_ahead=3, window_backward=1, 
+    def __init__(self,
+                 conv_channels,
+                 embed_dim,
+                 att_hid,
+                 n_speakers,
+                 speaker_embed_dim,
+                 key_position_rate, # sum(num_mel_frame) / sum(num_text_frame)
+                 query_position_rate,
+                 position_weight,
+                 max_positions=512,
+                 dropout=0.1,
+                 window_ahead=3,
+                 window_backward=1,
                  ):
         super(AttentionLayer, self).__init__()
         # Used for compute multiplier for positional encodings
@@ -126,12 +136,16 @@ class AttentionLayer(nn.Module):
         self.window_ahead = window_ahead
         self.window_backward = window_backward
 
-    def forward(self, query, encoder_out, text_positions=None, frame_positions=None,
+    def forward(self,
+                query,
+                encoder_out,
+                text_positions=None, # [1,2,3,...]
+                frame_positions=None,
                 speaker_embed=None, key_enc=None, query_enc=None,
                 incremental=False, mask=None, last_attended=None):
         keys, values = encoder_out
 
-        # position encodings
+        # position encodings (text)
         if text_positions is not None:
             # TODO: may be useful to have projection per attention layer
             if self.speaker_proj1 is not None:
@@ -140,6 +154,8 @@ class AttentionLayer(nn.Module):
                 w = self.key_position_rate
             text_pos_enc = self.position_weight * self.position_enc(text_positions, w)
             keys = keys + text_pos_enc[:,:keys.size(1), :]
+
+        # position encodings (mel)
         if frame_positions is not None:
             if self.speaker_proj2 is not None:
                 w = 2 * torch.sigmoid(self.speaker_proj2(speaker_embed)).view(-1)
@@ -150,14 +166,19 @@ class AttentionLayer(nn.Module):
 
         keys = keys.contiguous()
 
+        # embed_dim -> att_hid (value)
         if self.value_projection is not None:
            values = self.value_projection(values)
-        # TODO: yes, this is inefficient
+
+        # embed_dim -> att_hid (key)
         if self.key_projection is not None:
             keys = self.key_projection(keys)
 
         # attention
+        # conv_channels -> att_hid (query)
         x = self.query_projection(query)
+
+        # Calculate the dot product of keys and queries
         x = torch.bmm(x, keys.transpose(1,2))
 
         mask_value = -float("inf")
@@ -165,6 +186,8 @@ class AttentionLayer(nn.Module):
             mask = mask.view(query.size(0), 1, -1)
             x.data.masked_fill_(mask, mask_value)
 
+        # only inference
+        # TODO: xの３次元目の値
         if last_attended is not None:
             backward = last_attended - self.window_backward
             if backward > 0:
@@ -173,15 +196,13 @@ class AttentionLayer(nn.Module):
             if ahead < x.size(-1):
                 x[:, :, ahead:] = mask_value
 
-        # softmax over last dim
-        # (B, tgt_len, src_len)
-        #sz = x.size()
-        x = F.softmax(x, dim=2)#.view(sz[0] * sz[1], sz[2]), dim=1)
-        #x = x.view(sz)
+        x = F.softmax(x, dim=2)
+
         attn_scores = x
 
         x = F.dropout(x, p=self.dropout, training=self.training)
 
+        # Calculate the dot product of x and value
         x = torch.bmm(x, values)
 
         # scale attention output
